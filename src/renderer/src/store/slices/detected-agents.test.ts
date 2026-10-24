@@ -53,7 +53,7 @@ function createTestStore(initial?: Partial<AppState>) {
     activeRepoId: null,
     activeWorktreeId: null,
     ...initial
-  } as Partial<AppState>)
+  })
   return store
 }
 
@@ -399,7 +399,7 @@ describe('createDetectedAgentsSlice WSL context', () => {
       repos,
       activeRepoId: 'repo-1',
       activeWorktreeId: null
-    } as Partial<AppState>)
+    })
 
     await expect(store.getState().ensureDetectedAgents()).resolves.toEqual(['claude'])
 

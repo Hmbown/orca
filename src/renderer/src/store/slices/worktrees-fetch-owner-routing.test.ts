@@ -574,7 +574,7 @@ describe('fetchWorktrees', () => {
           updatedAt: 1
         }
       ]
-    } as Partial<AppState>)
+    })
     runtimeEnvironmentCall.mockResolvedValue({
       id: 'rpc-runtime-worktree',
       ok: true,

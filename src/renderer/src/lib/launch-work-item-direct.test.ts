@@ -221,7 +221,7 @@ describe('launchWorkItemDirect', () => {
       seedNativeChatLaunchPrompt: mocks.seedNativeChatLaunchPrompt,
       seedNativeChatLaunchDraft: mocks.seedNativeChatLaunchDraft,
       markNativeChatLaunchPromptFailed: mocks.markNativeChatLaunchPromptFailed
-    } as typeof mocks.store
+    }
     // Why: SSH fixtures use target `ssh-1`, which reports a Linux host once connected.
     mocks.store.sshConnectionStates = new Map([
       [
