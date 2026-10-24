@@ -103,7 +103,6 @@ export default function AiVaultPanel({
     setAllAgentsEnabled,
     resetViewOptions
   } = usePersistedAiVaultViewOptions(initialAgents)
-  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
   const { executionHostScope, onExecutionHostScopeChange, hostScopeOptions } =
     useAiVaultPanelHostScope(activeWorktreeId ?? null, resumeTargetState)
   const activeWorktreePath = activeWorktree?.path ?? null
@@ -125,9 +124,10 @@ export default function AiVaultPanel({
     [activeRepo, activeWorktree, allWorktrees, projectHostSetupProjection, repos]
   )
   const activeProjectKey = projectScopeContext.activeProjectKey
-  const { scope, handleScopeChange } = useAiVaultPanelScope({
+  const { scope, handleScopeChange, collapsedGroups, toggleGroup } = useAiVaultPanelScope({
     activeProjectKey,
-    activeWorktreePath
+    activeWorktreePath,
+    local: workspace !== undefined
   })
   const projectLabelByKey = projectScopeContext.projectLabelByKey
   // Sent to the scanner so scoped views surface sessions older than the global cap.
@@ -249,18 +249,6 @@ export default function AiVaultPanel({
     changeScope: handleScopeChange,
     setFocusSearchRequestId
   })
-
-  const toggleGroup = useCallback((key: string) => {
-    setCollapsedGroups((current) => {
-      const next = new Set(current)
-      if (next.has(key)) {
-        next.delete(key)
-      } else {
-        next.add(key)
-      }
-      return next
-    })
-  }, [])
 
   const requestDelete = useAiVaultSessionDeleteAction({
     refresh,
