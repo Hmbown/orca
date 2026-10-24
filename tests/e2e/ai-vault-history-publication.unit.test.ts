@@ -10,7 +10,7 @@ import {
   closeTestStores,
   createSqliteTestStore,
   writePersistedStateJson
-} from '../../src/main/persistence-test-harness'
+} from '../../src/main/persistence/persistence-test-harness'
 import { Store } from '../../src/main/persistence/loading-store/store'
 import { getDefaultPersistedState } from '../../src/shared/constants'
 import { hostWorktreeTarget } from '../../src/shared/worktree/host-qualified-identity'

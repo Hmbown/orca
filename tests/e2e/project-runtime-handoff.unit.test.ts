@@ -7,7 +7,7 @@ import {
   createSqliteTestStore,
   withPlatform,
   writePersistedStateJson
-} from '../../src/main/persistence-test-harness'
+} from '../../src/main/persistence/persistence-test-harness'
 import { Store } from '../../src/main/persistence/loading-store/store'
 import { rebuildRepoBackedProjectState } from '../../src/main/orca-profiles/profile-project-state-file'
 import { resolveLocalWorkspaceRuntime } from '../../src/main/local-project-runtime-resolution'
