@@ -22,7 +22,7 @@ async function logDragDiagnostics(page: Page, label: string, worktreeId: string,
   const info = await page.evaluate(
     ({ worktreeId, leafId }) => {
       const describe = (el: Element | null) =>
-        el ? `${el.tagName}.${(el as HTMLElement).className}`.slice(0, 120) : null
+        el ? `${el.tagName}.${String(el.className)}`.slice(0, 120) : null
       const handle = document.querySelector(`.pane[data-leaf-id="${leafId}"] .pane-drag-handle`)
       const strip = document.querySelector(
         `[data-tab-group-strip-id][data-worktree-id="${worktreeId}"]`
