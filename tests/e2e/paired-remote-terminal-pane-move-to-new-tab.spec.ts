@@ -2,6 +2,7 @@ import type {
   RuntimeMobileSessionTabsResult,
   RuntimeTerminalListResult
 } from '../../src/shared/runtime-types'
+import type { Page } from '@stablyai/playwright-test'
 import { expect, test } from './helpers/orca-app'
 import { launchHeadlessPairedRuntimeHost } from './helpers/headless-paired-runtime-host'
 import {
@@ -15,6 +16,40 @@ import {
 import { toWebTerminalSurfaceTabId } from '../../src/shared/terminal-surface-id'
 import { dragPaneOutToTabStrip, waitForBoundPanes } from './helpers/terminal-layout-journeys'
 import { splitActiveTerminalPane } from './helpers/terminal'
+
+// TEMP diagnostics for CI-only drag failures.
+async function logDragDiagnostics(page: Page, label: string, worktreeId: string, leafId: string) {
+  const info = await page.evaluate(
+    ({ worktreeId, leafId }) => {
+      const describe = (el: Element | null) =>
+        el ? `${el.tagName}.${(el as HTMLElement).className}`.slice(0, 120) : null
+      const handle = document.querySelector(`.pane[data-leaf-id="${leafId}"] .pane-drag-handle`)
+      const strip = document.querySelector(
+        `[data-tab-group-strip-id][data-worktree-id="${worktreeId}"]`
+      )
+      const box = (el: Element | null) => {
+        const r = el?.getBoundingClientRect()
+        return r
+          ? [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)]
+          : null
+      }
+      const h = handle?.getBoundingClientRect()
+      const at = h ? document.elementFromPoint(h.left + h.width / 2, h.top + 4) : null
+      return {
+        handle: box(handle),
+        handleStyle: handle ? getComputedStyle(handle).pointerEvents : null,
+        multiple: Boolean(handle?.closest('.has-multiple-panes')),
+        atHandle: describe(at),
+        strip: box(strip),
+        strips: document.querySelectorAll('[data-tab-group-strip-id]').length,
+        tabs: Array.from(strip?.querySelectorAll('[data-tab-id]') ?? []).map((t) => box(t)),
+        window: [window.innerWidth, window.innerHeight]
+      }
+    },
+    { worktreeId, leafId }
+  )
+  console.log(`DRAGDIAG ${label} ${JSON.stringify(info)}`)
+}
 
 const PANE = '.pane[data-leaf-id]:visible'
 const TAB = '[data-testid="sortable-tab"]'
@@ -132,7 +167,16 @@ test('a pane moved to a new tab on a paired server workspace stays in its new ta
         .toBe(2)
 
       // Dropped before the first tab, so the new tab's place differs from the server's append.
+      page.on('console', (message) => {
+        const text = message.text()
+        if (/terminal-pane-detach|web-runtime-session|pane/i.test(text)) {
+          console.log(`RENDERER ${message.type()} ${text.slice(0, 300)}`)
+        }
+      })
+      await logDragDiagnostics(page, 'before', worktreeId, movedLeafId)
       await dragPaneOutToTabStrip(page, worktreeId, movedLeafId, 'start')
+      await page.waitForTimeout(1_000)
+      await logDragDiagnostics(page, 'after', worktreeId, movedLeafId)
       await expect(page.locator(TAB)).toHaveCount(tabCount + 1, { timeout: 15_000 })
       const [movedTabId] = await readClientTabOrder()
       expect(movedTabId).not.toBe(sourceTabId)
@@ -259,6 +303,13 @@ test('a pane move the server refuses goes back into its split, terminal intact',
         document.body.dataset.paneMoveTabCounts = `${added}/${count() - before}`
       })
     }, worktreeId)
+    page.on('console', (message) => {
+      const text = message.text()
+      if (/terminal-pane-detach|web-runtime-session|pane/i.test(text)) {
+        console.log(`RENDERER ${message.type()} ${text.slice(0, 300)}`)
+      }
+    })
+    await logDragDiagnostics(page, 'refused-before', worktreeId, movedLeafId)
     await dragPaneOutToTabStrip(page, worktreeId, movedLeafId)
     await expect
       .poll(() => page.evaluate(() => document.body.dataset.paneMoveTabCounts ?? null), {
