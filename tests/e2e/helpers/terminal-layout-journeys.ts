@@ -117,11 +117,34 @@ export async function dragPaneOutToTabStrip(
   await page.evaluate(() => {
     const events: string[] = []
     document.body.dataset.dragEvents = ''
-    const note = (name: string) => (event: Event) => {
-      events.push(
-        `${name}:${event.target instanceof Element ? event.target.className : 'win'}`.slice(0, 80)
-      )
-      document.body.dataset.dragEvents = events.slice(-30).join('|')
+    const t0 = performance.now()
+    const push = (entry: string) => {
+      events.push(`${Math.round(performance.now() - t0)}ms ${entry}`.slice(0, 160))
+      document.body.dataset.dragEvents = events.slice(-60).join(' | ')
+    }
+    const note = (name: string) => (event: Event) =>
+      push(`${name}:${event.target instanceof Element ? event.target.className : 'win'}`)
+    new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.addedNodes) {
+          if (node instanceof HTMLElement && node.classList.contains('pane')) {
+            push(`mount pane leaf=${node.dataset.leafId}`)
+          }
+        }
+        for (const node of record.removedNodes) {
+          if (node instanceof HTMLElement && node.classList.contains('pane')) {
+            push(`unmount pane leaf=${node.dataset.leafId}`)
+          }
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true })
+    const log = console.log.bind(console)
+    console.log = (...args: unknown[]) => {
+      const text = args.map(String).join(' ')
+      if (text.includes('[pty-connect]')) {
+        push(text.slice(0, 140))
+      }
+      log(...args)
     }
     window.addEventListener('blur', note('blur'), true)
     window.addEventListener('pointerdown', note('down'), true)
@@ -162,4 +185,6 @@ export async function dragPaneOutToTabStrip(
     )
   )
   await page.mouse.up()
+  await page.waitForTimeout(3_000)
+  console.log('DRAGAFTER', await page.evaluate(() => document.body.dataset.dragEvents ?? ''))
 }
