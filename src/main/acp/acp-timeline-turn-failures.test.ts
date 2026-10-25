@@ -10,7 +10,7 @@ import { AcpAgentError } from './acp-errors'
 
 afterEach(closeProviderTimelineRigs)
 
-// The shape Grok sends for a prompt its API refused, with the reason scrubbed to a placeholder.
+// Captured Grok API failure with a placeholder reason.
 const REASON = 'API error (status 400 Bad Request): invalid_request_error: placeholder reason'
 const session = { sessionId: 'session-1' }
 const queued = (promptId: string) => ({ ...session, entries: [], runningPromptId: promptId })
@@ -82,7 +82,6 @@ describe('a failed ACP turn says why', () => {
     const rows = await f.rig.rows()
     const failures = statusRows(rows)
     expect(failures).toHaveLength(1)
-    // The turn ran, so the row reads as Codex's turn-ending error does: no refusal sentence or fact.
     expect(failures[0]?.body).toEqual({ kind: 'status', tone: 'error', text: REASON })
     const turns = await f.rig.turns()
     expect(turns.map((turn) => [turn.state, turn.outcome])).toEqual([
@@ -171,7 +170,9 @@ describe('a failed ACP turn says why', () => {
     const prompt = lane.openPrompt('c1', 1000)
     f.apply(lane.notification('_x.ai/queue/changed', queued(prompt.promptId), 1001))
     f.apply(lane.notification('_x.ai/session_notification', retryFailed, 1002))
-    f.apply(lane.notification('_x.ai/session_notification', ended(prompt.promptId, 'rate_limit'), 1003))
+    f.apply(
+      lane.notification('_x.ai/session_notification', ended(prompt.promptId, 'rate_limit'), 1003)
+    )
     f.apply(
       lane.notification(
         '_x.ai/session/prompt_complete',

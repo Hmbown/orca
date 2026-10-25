@@ -1,4 +1,4 @@
-// The chat's permission mode as a picker descriptor: shows the mode the host states, never derives it.
+// Show host-stated permission mode; never infer what is running.
 
 import {
   AGENT_CHAT_PERMISSION_MODE_OPTION_ID,
@@ -8,7 +8,7 @@ import {
   type AgentChatPermissionMode
 } from './agent-chat-permission-mode'
 import type { AgentSessionOptionCatalog } from './agent-session-option-catalog'
-import type { NativeChatSessionOptionRecord } from './native-chat-session-option-state'
+import type { StructuredAgentSessionOptionRecord } from './structured-agent-session-option-state'
 import type { SessionOptionDescriptor } from './native-chat-session-options'
 
 /** English names and descriptions for surfaces without a translation catalog. */
@@ -54,12 +54,11 @@ function agentDescriptions(agent: string): Partial<Record<AgentChatPermissionMod
   return AGENT_DESCRIPTIONS.get(agent) ?? OTHER_AGENT_DESCRIPTIONS
 }
 
-/** Only decides whether the menu offers Approve for me, by the host's own rule. */
 function currentModelSupportsAutoMode(
   catalog: AgentSessionOptionCatalog | null,
-  record: NativeChatSessionOptionRecord
+  record: StructuredAgentSessionOptionRecord
 ): boolean {
-  const model = record.model?.value
+  const model = record.values.model?.value
   return (
     catalog !== null &&
     chatModelSupportsAutoMode(catalog.models, typeof model === 'string' ? model : undefined)
@@ -68,8 +67,9 @@ function currentModelSupportsAutoMode(
 
 export function structuredAgentSessionPermissionDescriptor(state: {
   catalog: AgentSessionOptionCatalog | null
-  record: NativeChatSessionOptionRecord
+  record: StructuredAgentSessionOptionRecord
   permissionMode: string | null
+  pendingId?: string | null
 }): SessionOptionDescriptor | null {
   const support = agentChatPermissionModes(state.record.agent)
   const current = support?.modes.find((mode) => mode === state.permissionMode)
@@ -78,7 +78,8 @@ export function structuredAgentSessionPermissionDescriptor(state: {
   }
   const offered = offeredChatPermissionModes(
     support,
-    current === 'auto' || currentModelSupportsAutoMode(state.catalog, state.record)
+    current === 'auto' ||
+      (state.pendingId !== 'model' && currentModelSupportsAutoMode(state.catalog, state.record))
   )
   return {
     id: AGENT_CHAT_PERMISSION_MODE_OPTION_ID,
@@ -99,10 +100,10 @@ export function structuredAgentSessionPermissionDescriptor(state: {
   }
 }
 
-/** The value a host predating per-chat modes shows: it runs its own Agent Permissions. */
+/** Older hosts apply their own Agent Permissions instead of per-chat modes. */
 export const LEGACY_HOST_PERMISSION_VALUE = 'host'
 
-/** A read-only pill for a host that ignores per-chat modes, so its chats never look unset. */
+/** Read-only legacy-host mode prevents unsupported per-chat settings from looking unset. */
 export function legacyHostPermissionDescriptor(): SessionOptionDescriptor {
   return {
     id: AGENT_CHAT_PERMISSION_MODE_OPTION_ID,

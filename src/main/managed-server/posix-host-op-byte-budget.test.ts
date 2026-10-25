@@ -60,9 +60,10 @@ import {
   probeRemoteNodeRuntimeCommand,
   promoteRemoteNodeRuntimeCommand,
   recheckAndPromoteRemoteNodeRuntimeCommand,
-  remoteNodeRuntimePresentCommand,
-  remoteSha256Command
+  remoteNodeRuntimePresentCommand
 } from './install/orcad-remote-node-runtime'
+import { remoteSha256Command } from './install/remote-sha256-command'
+import { hostDownloadNodeRuntimeCommand } from './install/remote-node-runtime-host-download'
 import { remoteOrcadBuildHashCommand } from './install/orcad-remote-build-hash'
 import { remoteFreeSpaceProbeCommand } from './install/remote-install-out-of-space'
 import { sweepStaleRuntimeStagesCommand } from './install/remote-node-runtime-store-gc'
@@ -90,21 +91,16 @@ import {
 } from './install/orcad-remote-readiness-wait'
 import { orcadPosixStdioBridgeCommand } from './lifecycle/orcad-stdio-bridge-script'
 
-// Why 6 KB: gateways cut exec requests near 10 KB (#30491). This bounds the wire string: the
-// fence-guarded command, wrapped uncompressed as a host without gzip/base64 receives it.
+// Gateways truncate near 10 KB (#30491); bound uncompressed, fenced commands to 6 KB.
 const POSIX_HOST_OP_BYTE_BUDGET = 6 * 1024
 
-// Ops already past the budget, at their measured size. Ceilings may only shrink.
 const OVER_BUDGET_CEILINGS: Readonly<Record<string, number>> = {
   tryStealInstallLockCommand: 9_022,
-  orcadLaunchCommand: 8_122,
-  'orcadLaunchCommand (WSL setsid)': 6_439,
-  probeRemoteInstallCompleteCommand: 12_189
+  orcadLaunchCommand: 6_896
 }
 
 type HostCase = { host: RemoteHostPlatform; target: NodeRuntimeTarget; nodePath: string }
 
-// Realistic worst case: a long NFS home, a long account name and a held activation fence.
 const home = `/net/nfs-home-cluster-03/users/engineering/${'a'.repeat(48)}.longname`
 const baseDir = `${home}/.orca-remote`
 const slotDir = `${baseDir}/orcad-1.4.299-rc.12+${'f'.repeat(40)}`
@@ -152,7 +148,6 @@ function promoteArgs({
 
 const BUILDERS: Readonly<Record<string, (c: HostCase) => string>> = {
   serializedStateMutationCommand: () => serializedStateMutationCommand(baseDir, ':', 20, fence),
-  // As activation runs it: pruning every other capture but the recorded one.
   captureOrcadStateSnapshotCommand: ({ host }) =>
     captureOrcadStateSnapshotCommand(host, userDataDir, snapshotDir, baseDir, {
       snapshotsRoot: `${baseDir}/orcad-snapshots`,
@@ -176,7 +171,7 @@ const BUILDERS: Readonly<Record<string, (c: HostCase) => string>> = {
   orcadNodeSlotRuntimeCommand: ({ host }) => orcadNodeSlotRuntimeCommand(host, slotDir),
   selectOrcadSlotRuntimeCommand: ({ host, nodePath }) =>
     selectOrcadSlotRuntimeCommand(host, slotDir, nodePath),
-  // As SSH launches it; on macOS it embeds the launch-session capture and record.
+  // macOS launch embeds SSH-session capture and attribution records.
   orcadLaunchCommand: ({ host, nodePath }) =>
     orcadLaunchCommand(host, launchSpec(nodePath), 'nohup', []),
   'orcadLaunchCommand (WSL setsid)': ({ host, nodePath }) =>
@@ -187,6 +182,8 @@ const BUILDERS: Readonly<Record<string, (c: HostCase) => string>> = {
   orcadLivenessProbeCommand: ({ host }) => orcadLivenessProbeCommand(host, slotDir),
   remoteSha256Command: ({ nodePath }) => remoteSha256Command(`'${nodePath}'`),
   remoteFreeSpaceProbeCommand: ({ nodePath }) => remoteFreeSpaceProbeCommand(nodePath),
+  hostDownloadNodeRuntimeCommand: ({ host, nodePath, target }) =>
+    hostDownloadNodeRuntimeCommand(host, { stageDir: `${nodePath}.stage-${token}`, target }),
   createExecProbedStageCommand: ({ host, nodePath }) =>
     createExecProbedStageCommand(host, `${nodePath}.stage-${token}`),
   probeRemoteNodeRuntimeCommand: ({ host, nodePath, target }) =>
@@ -272,7 +269,6 @@ const BUILDERS: Readonly<Record<string, (c: HostCase) => string>> = {
     makePosixWriteFileCommand(`${slotDir}/orcad.js`, { exclusive: true })
 }
 
-// Exported builders that never produce a POSIX host op, and why.
 const NOT_POSIX_HOST_OPS: Readonly<Record<string, string>> = {
   powerShellCommand: 'builds the Windows PowerShell exec line',
   spawnProxyCommand: 'spawns a local ProxyCommand process',
@@ -283,7 +279,7 @@ const NOT_POSIX_HOST_OPS: Readonly<Record<string, string>> = {
   spawnSystemSshCommand: 'spawns the local ssh client'
 }
 
-// Not ssh/legacy-relay: the legacy relay retires 2027-01-15.
+// Legacy relay retires 2027-01-15; exclude its host operations.
 const SCANNED_DIRS = [
   ...['host-state', 'install', 'lifecycle', 'activation'].map((dir) => join(__dirname, dir)),
   join(__dirname, '..', 'ssh'),
@@ -315,12 +311,12 @@ function exportedCommandBuilders(): string[] {
   return names.sort()
 }
 
-// The largest wire string across POSIX host OSes; guarded even where the op can run unfenced.
+// Measure the largest POSIX command, including guards even for optionally fenced operations.
 async function sentBytes(build: (c: HostCase) => string): Promise<number> {
   let max = 0
   for (const c of HOST_CASES) {
     const command = await runWithOrcadFence(fence, async () => build(c))
-    // execCommand frames stdout before the transport wraps; 16 chars is the longest real nonce.
+    // Match exec stdout framing; real nonces are at most 16 characters.
     const framed = buildPosixStdoutFence(
       `${posixOrcadFenceGuard(fence)} ${command}`,
       'SSH',
@@ -347,7 +343,6 @@ describe('POSIX host-op byte budget', () => {
       expect(bytes).toBeLessThanOrEqual(POSIX_HOST_OP_BYTE_BUDGET)
       return
     }
-    // A listed op must stay listed only while it is actually over budget.
     expect(bytes).toBeGreaterThan(POSIX_HOST_OP_BYTE_BUDGET)
     expect(bytes).toBeLessThanOrEqual(ceiling)
   })

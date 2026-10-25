@@ -20,7 +20,6 @@ const CLAUDE_LIMIT_WINDOWS: Record<string, AgentSessionUsageLimitWindow> = {
   overage: 'credits'
 }
 
-/** The ends a result reports when a limit refused its request; any other is a different failure. */
 const LIMIT_TERMINAL_REASONS = ['api_error']
 
 export type ClaudeUsageLimitRow = AgentSessionFailureRowWords & {
@@ -69,9 +68,7 @@ export class ClaudeUsageLimits {
     const root = message.parent_tool_use_id == null
     const decision = !typed && root ? (turn?.usageLimitEvidence?.cause ?? cause) : cause
     const row =
-      decision !== 'other' && refused
-        ? this.row(messageText(message), decision === 'quota')
-        : null
+      decision !== 'other' && refused ? this.row(messageText(message), decision === 'quota') : null
     if (root && turn?.isOpen && (typed || (refused && decision === 'untyped'))) {
       turn.usageLimitEvidence = { cause: row ? 'quota' : cause }
     }
@@ -119,7 +116,7 @@ export class ClaudeUsageLimits {
     }
   }
 
-  /** Every refusing limit must reset before a request can run, so the latest reset is the one. */
+  /** All rejecting limits must reset before requests can resume. */
   private limit(): AgentSessionUsageLimit | null {
     const now = this.now()
     for (const [type, resetsAt] of this.rejected) {
@@ -137,10 +134,7 @@ export class ClaudeUsageLimits {
     return { ...(window ? { window } : {}), ...(resetsAt ? { resetsAt } : {}) }
   }
 
-  private row(
-    providerText: string,
-    typed = false
-  ): ClaudeUsageLimitRow | null {
+  private row(providerText: string, typed = false): ClaudeUsageLimitRow | null {
     const limit = this.limit()
     if (!limit && !typed) {
       return null

@@ -1,9 +1,5 @@
-/**
- * Opaque blobs a migration carries beside the signed manifest: data the catalog does not model
- * (pane restore hints, shell history files, native-chat records) that the destination installs
- * itself. Each kind is gated by its own destination capability, because an older destination
- * would drop a kind it does not know — the desktop refuses before staging instead.
- */
+/** Opaque migration blobs travel beside the signed catalog. Gate each kind by its destination capability:
+ * older destinations drop unknown kinds, so clients must refuse before staging. */
 import { z } from 'zod'
 import {
   ORCAD_MIGRATION_SCROLLBACK_CHUNK_BYTES,
@@ -19,8 +15,7 @@ import { ORCAD_MIGRATION_BLOB_CHANNEL_RUNTIME_CAPABILITY } from '../orcad-runtim
 export const ORCAD_MIGRATION_BLOB_KINDS = [
   'terminal-restore-hints',
   'shell-history',
-  'agent-session-records',
-  'editor-drafts'
+  'agent-session-records'
 ] as const
 
 export type OrcadMigrationBlobKind = (typeof ORCAD_MIGRATION_BLOB_KINDS)[number]
@@ -55,12 +50,6 @@ export const ORCAD_MIGRATION_BLOB_KIND_CONTRACTS: Record<
     key: /^[a-z0-9][a-z0-9_-]{0,127}$/,
     maxBytes: 64 * MIB,
     capability: 'orcad.migration-blob.agent-session-records.v1'
-  },
-  // Every shed unsaved editor buffer of the migration in one document, named by the manifest.
-  'editor-drafts': {
-    key: /^drafts$/,
-    maxBytes: 64 * MIB,
-    capability: 'orcad.migration-blob.editor-drafts.v1'
   }
 }
 
@@ -139,7 +128,6 @@ export function parseOrcadMigrationBlobDescriptor(value: unknown): OrcadMigratio
   }
 }
 
-/** Duplicate-free and within the count and total caps; the shape both peers hold a set to. */
 export function assertOrcadMigrationBlobSet(
   descriptors: readonly OrcadMigrationBlobDescriptor[]
 ): void {
@@ -266,8 +254,7 @@ export function parseOrcadMigrationBlobChunkResult(
 /** Kinds this build's destination installs after commit; each is added with its installer. */
 export const ORCAD_MIGRATION_INSTALLABLE_BLOB_KINDS: readonly OrcadMigrationBlobKind[] = [
   'terminal-restore-hints',
-  'shell-history',
-  'editor-drafts'
+  'shell-history'
 ]
 
 export function advertisedOrcadMigrationBlobCapabilities(): string[] {

@@ -32,8 +32,6 @@ const MERGED_SESSION_RECORD_FIELDS = [
 export type PreparedOrcadMigrationWorkspaceSession = {
   incoming: WorkspaceSessionState | undefined
   merged: WorkspaceSessionState | undefined
-  /** Checked at staging without the declared drafts; never applied, or they would be lost. */
-  editorDraftsPending?: true
 }
 
 export function prepareOrcadMigrationWorkspaceSession(
@@ -43,20 +41,13 @@ export function prepareOrcadMigrationWorkspaceSession(
   if (!incoming) {
     return { incoming: undefined, merged: undefined }
   }
-  assertNoOrcadMigrationSessionConflicts(state.workspaceSession, incoming)
+  assertNoSessionRecordConflicts(state.workspaceSession, incoming)
+  assertNoSessionFocusConflicts(state.workspaceSession, incoming)
+  assertNoSessionEntityConflicts(state.workspaceSession, incoming)
   return {
     incoming,
     merged: mergeWorkspaceSessions(state.workspaceSession, incoming)
   }
-}
-
-export function assertNoOrcadMigrationSessionConflicts(
-  existing: WorkspaceSessionState,
-  incoming: WorkspaceSessionState
-): void {
-  assertNoSessionRecordConflicts(existing, incoming)
-  assertNoSessionFocusConflicts(existing, incoming)
-  assertNoSessionEntityConflicts(existing, incoming)
 }
 
 function assertNoSessionFocusConflicts(
@@ -82,9 +73,6 @@ export function applyPreparedOrcadMigrationWorkspaceSession(
   prepared: PreparedOrcadMigrationWorkspaceSession,
   state: PersistedState
 ): void {
-  if (prepared.editorDraftsPending) {
-    throw new Error('orcad_migration_editor_drafts_not_applied')
-  }
   if (prepared.merged) {
     state.workspaceSession = prepared.merged
   }
@@ -135,15 +123,13 @@ export function collectOrcadMigrationSessionEntityOwners(
   const owners = new Map<string, string>()
   visitOrcadMigrationSessionEntities(session, (key, owner) => {
     const current = owners.get(key)
-    // A duplicate entity id is invalid even when both rows claim the same owner. Marking every
-    // repeat lets the caller reject duplicates within the incoming payload as well as conflicts
-    // with already-committed state.
+    // Mark every duplicate, even same-owner repeats within the incoming payload.
     owners.set(key, current === undefined ? owner : '\0')
   })
   return owners
 }
 
-/** Each identity the destination keeps unique (`kind:id`), with its owning worktree or tab id. */
+/** Unique kind:id identities and their owning worktree or tab. */
 export function visitOrcadMigrationSessionEntities(
   session: WorkspaceSessionState,
   add: (key: string, owner: string) => void

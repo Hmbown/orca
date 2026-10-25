@@ -36,7 +36,11 @@ const intake = vi.hoisted(() => {
     pick: vi.fn()
   }
 })
-vi.mock('@/store', () => ({ useAppStore: { getState: () => ({ tabsByWorktree: {} }) } }))
+vi.mock('@/store', () => ({
+  useAppStore: Object.assign((select: () => unknown) => select(), {
+    getState: () => ({ tabsByWorktree: {} })
+  })
+}))
 // Keeps the real notice strings so the silent-failure guards assert what users see.
 vi.mock('./native-chat-attachment-upload', async (importOriginal) => ({
   ...(await importOriginal<typeof AttachmentUploadModule>()),
@@ -259,8 +263,7 @@ describe('native chat composer drop scoping', () => {
     expect(intake.stat).not.toHaveBeenCalled()
   })
 
-  // #15782: an OS drop that produces nothing must say so. Every assertion here
-  // is about the absence of silence, not about which path was attached.
+  // An OS drop with no readable path must report failure instead of silently attaching nothing.
   it('reports an OS drop whose files carry no readable path', async () => {
     electron.getPathForFile.mockReturnValue('')
     const view = render(<ComposerProbe pane="chat-a" />)
@@ -323,7 +326,6 @@ describe('native chat composer drop scoping', () => {
       '/repro/second.png'
     ])
     expect(readNativeChatAttachmentCache('chat-b')).toEqual([])
-    // Each image gets a chip at the caret, numbered by its thumbnail.
     expect(target.textContent).toBe('Image #1 Image #2 untouched draft')
 
     view.unmount()
@@ -348,7 +350,6 @@ describe('native chat composer drop scoping', () => {
       '/repro/first.png',
       '/repro/second.png'
     ])
-    // Both panes show the one shared draft.
     const shown = [...view.container.querySelectorAll('output:not([data-notice])')].map(
       (output) => output.textContent
     )

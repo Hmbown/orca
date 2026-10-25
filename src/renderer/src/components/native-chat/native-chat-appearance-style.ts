@@ -9,8 +9,10 @@ import { getSystemPrefersDark, isTerminalBackgroundLight } from '@/lib/terminal-
 import { useSystemPrefersDark } from '../terminal-pane/use-system-prefers-dark'
 
 export const NATIVE_CHAT_APPEARANCE_ROOT_CLASS = 'native-chat-appearance bg-chat-canvas'
-// pb clears the last reply's controls, which hang 20px (-mb-5) below the row.
-export const NATIVE_CHAT_TRANSCRIPT_OUTER_CLASS = 'px-3 pt-10 pb-10 sm:px-4'
+// Bottom padding clears 20px control overhang; rail padding also covers its 34px overlay on macOS without scrollbar gutters.
+export function nativeChatTranscriptOuterClass(railVisible: boolean): string {
+  return railVisible ? 'px-9 pt-10 pb-10' : 'px-3 pt-10 pb-10 sm:px-4'
+}
 export const NATIVE_CHAT_TRANSCRIPT_COLUMN_CLASS =
   'mx-auto flex w-full max-w-(--chat-content-max-width) flex-col gap-5 px-[5px]'
 

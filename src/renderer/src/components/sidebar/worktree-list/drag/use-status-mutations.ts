@@ -21,8 +21,7 @@ import {
   type DraggedWorktreeCopies
 } from './dragged-worktree-copies'
 
-// Every write a sidebar drop can make: status changes, pin, manual order, and the board lane drop.
-// Each id is written through `dropWriteRows`, never an id-keyed map: a twin on another host shares it.
+// Route every status/rank write through dropWriteRows because IDs repeat across hosts.
 export function useWorktreeStatusMutations(args: {
   manualOrderCatalog: WorktreeManualOrderCatalog
   workspaceStatuses: readonly WorkspaceStatusDefinition[]
@@ -99,18 +98,17 @@ export function useWorktreeStatusMutations(args: {
     [manualOrderCatalog, updateWorktreesMeta, workspaceStatuses]
   )
 
-  const pinWorktree = useCallback(
-    (worktreeId: string) => {
-      setWorktreesPinnedAndReveal([worktreeId], true)
+  const pinWorktrees = useCallback(
+    (worktreeIds: readonly string[], draggedCopies?: DraggedWorktreeCopies) => {
+      const rowsFor = dropWriteRows(useAppStore.getState(), draggedCopies)
+      setWorktreesPinnedAndReveal(worktreeIds.flatMap(rowsFor.status), true)
     },
     [setWorktreesPinnedAndReveal]
   )
 
-  const pinWorktrees = useCallback(
-    (worktreeIds: readonly string[]) => {
-      setWorktreesPinnedAndReveal(worktreeIds, true)
-    },
-    [setWorktreesPinnedAndReveal]
+  const pinWorktree = useCallback(
+    (worktreeId: string) => pinWorktrees([worktreeId]),
+    [pinWorktrees]
   )
 
   const reorderWorktrees = useCallback(

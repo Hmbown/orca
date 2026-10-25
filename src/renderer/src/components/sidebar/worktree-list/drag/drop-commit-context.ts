@@ -34,7 +34,6 @@ export type WorktreeReorderArgs = {
   draggedCopies?: DraggedWorktreeCopies
 }
 
-// The shared surface every drop path (pointer, native drag, document capture) commits through.
 export type WorktreeDropCommitContext = {
   scrollRef: React.RefObject<HTMLDivElement | null>
   workspaceStatuses: readonly WorkspaceStatusDefinition[]
@@ -62,5 +61,5 @@ export type WorktreeDropCommitContext = {
   ) => void
   onMoveWorktreesToStatusAtIndex: (args: WorktreeStatusDropAtIndexArgs) => void
   onReorderWorktrees: (args: WorktreeReorderArgs) => void
-  onPinWorktrees: (worktreeIds: readonly string[]) => void
+  onPinWorktrees: (worktreeIds: readonly string[], draggedCopies?: DraggedWorktreeCopies) => void
 }

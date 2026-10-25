@@ -32,7 +32,7 @@ import {
   type WorkspaceLayoutModel
 } from './workspace-layout-model'
 import { admitsInitialSurface } from './workspace-layout-initial-surface'
-import { heldPaneOfTerminal } from './workspace-layout-terminal-adoption'
+import { adoptedLeaf, appliedHeldAdoption } from './workspace-layout-terminal-adoption'
 import { removeTabFromWorkspace, withWorkspace } from './workspace-layout-removal'
 
 type RefusedClose = NonNullable<LayoutCommandResult['refused']>[number]
@@ -45,10 +45,9 @@ export function createTerminalTab(
   if (command.initial && !admitsInitialSurface(model, command.workspace, command.initial)) {
     return applied(model)
   }
-  const held =
-    command.adopt && heldPaneOfTerminal(model.workspaces[command.workspace], command.adopt)
+  const held = command.adopt && appliedHeldAdoption(model, command.workspace, command.adopt)
   if (held) {
-    return applied(model, held)
+    return held
   }
   const workspace = workspaceOrEmpty(model, command.workspace)
   const terminals = workspace.tabs.flatMap((tab) => (tab.kind === 'terminal' ? [tab] : []))
@@ -73,7 +72,7 @@ export function createTerminalTab(
   const paneKey = paneKeyOf(id, leafId)
   if (command.adopt) {
     // Its terminal already runs: the pane binds to it and nothing starts.
-    const leaves = { ...placed.leaves, [leafId]: { ptyId: command.adopt.ptyId } }
+    const leaves = { ...placed.leaves, [leafId]: adoptedLeaf(command.adopt) }
     const adopted = withWorkspace(model, command.workspace, { ...placed, leaves })
     return applied(adopted, { tabId: id, leafId, paneKey })
   }
@@ -184,13 +183,14 @@ export function renameTab(model: WorkspaceLayoutModel, command: CommandOf<'renam
   if (command.kind === 'aiVault') {
     return updateTab(model, command.workspace, { ...tab, aiVaultTitle: command.title })
   }
-  return updateTab(
-    model,
-    command.workspace,
-    command.kind === 'custom'
-      ? { ...tab, customTitle: command.title }
-      : { ...tab, generatedTitle: command.title }
-  )
+  if (command.kind === 'custom') {
+    return updateTab(model, command.workspace, { ...tab, customTitle: command.title })
+  }
+  // As the window's own generated titles: an agent's later prompt does not rename the tab.
+  if (tab.generatedTitle?.trim() && !command.replaceExisting) {
+    return refuse('generated_title_kept')
+  }
+  return updateTab(model, command.workspace, { ...tab, generatedTitle: command.title })
 }
 
 export function setTabProps(
@@ -263,11 +263,7 @@ export function promotePreviewTab(
   return updateTab(model, command.workspace, promoted)
 }
 
-/**
- * A new tab replaces the group's preview tab of a compatible kind, as a single click does today,
- * unless closing it is refused like any close (an unsaved draft): then both stay. The new tab is
- * placed first, so closing a group's only tab, its preview, never closes the group.
- */
+/** Place the new tab before closing its compatible preview so the group survives. Refuse the preview close normally for unsaved drafts, retaining both tabs. */
 export function placeContentTab(
   model: WorkspaceLayoutModel,
   key: string,
@@ -276,12 +272,9 @@ export function placeContentTab(
   context: LayoutContext
 ): { model: WorkspaceLayoutModel; refused: RefusedClose[] } {
   const workspace = workspaceOrEmpty(model, key)
-  const anchor = placement.afterTabId
-  // A named group this copy lacks falls back to the anchor's.
+  // A host's open names no group; a window's names one from main's own frame.
   const group =
-    workspace.groups.find((entry) => entry.id === placement.groupId) ??
-    (anchor ? workspace.groups.find((entry) => entry.tabOrder.includes(anchor)) : undefined) ??
-    workspace.groups[0]
+    workspace.groups.find((entry) => entry.id === placement.groupId) ?? workspace.groups[0]
   const preview = tab.isPreview
     ? workspace.tabs.find(
         (entry) =>
@@ -297,7 +290,6 @@ export function placeContentTab(
       workspace,
       key,
       tab,
-      // The sender's group names a workspace's first group.
       {
         groupId: group?.id ?? placement.groupId,
         afterTabId: placement.afterTabId,

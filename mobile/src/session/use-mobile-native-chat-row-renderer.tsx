@@ -19,7 +19,6 @@ type Row = { item: NativeChatMessage; index: number }
 export function useMobileNativeChatRowRenderer({
   rowKeyOf,
   runOwners,
-  toolsExpanded,
   taskListPredecessors,
   fontScale,
   onOpenFile,
@@ -30,10 +29,8 @@ export function useMobileNativeChatRowRenderer({
   receipts,
   actionablePromptIds
 }: {
-  /** The row's place on the page, kept while older messages join it. */
   rowKeyOf: (message: NativeChatMessage) => string
   runOwners: ReadonlyMap<string, string>
-  toolsExpanded: boolean
   /** The last plan each task-list tool wrote before each row, by row id. */
   taskListPredecessors: ReadonlyMap<string, NativeChatTaskListPredecessors>
   fontScale: number
@@ -79,7 +76,6 @@ export function useMobileNativeChatRowRenderer({
     (item: NativeChatMessage, rowProps: MobileNativeChatRowProps | undefined) => (
       <MobileNativeChatMessage
         message={item}
-        toolsExpanded={toolsExpanded}
         fontScale={fontScale}
         onOpenFile={onOpenFile}
         structuredActivityUi={structuredActivityUi}
@@ -87,7 +83,7 @@ export function useMobileNativeChatRowRenderer({
         {...rowProps}
       />
     ),
-    [toolsExpanded, fontScale, onOpenFile, structuredActivityUi, onToggleTurn]
+    [fontScale, onOpenFile, structuredActivityUi, onToggleTurn]
   )
   const renderItem = useCallback(
     ({ item, index }: Row) => renderMessage(item, listRowProps[index]),
