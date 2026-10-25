@@ -11,6 +11,7 @@ import { useMobileStructuredAgentTurnTiming } from './use-mobile-structured-agen
 import { MobileNativeChatPageList } from './MobileNativeChatPageList'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import { MobileNativeChatOverlay } from './MobileNativeChatOverlay'
+import type * as MobileNativeChatItemReadModule from './mobile-native-chat-item-read'
 import type { MobileNativeChatController } from './use-mobile-native-chat-controller'
 import { stubRpcClient } from '../transport/rpc-client-test-stub'
 import { MobileNativeChatView } from './MobileNativeChatView'
@@ -46,7 +47,7 @@ vi.mock('lucide-react-native', () => ({
 }))
 const itemReads = vi.hoisted(() => vi.fn())
 vi.mock('./mobile-native-chat-item-read', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('./mobile-native-chat-item-read')>()),
+  ...(await importOriginal<typeof MobileNativeChatItemReadModule>()),
   readMobileNativeChatItem: itemReads
 }))
 const rendered = vi.hoisted(() => new Map<string, number>())
