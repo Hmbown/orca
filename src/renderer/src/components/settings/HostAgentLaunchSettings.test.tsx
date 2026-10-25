@@ -1,5 +1,7 @@
 // @vitest-environment happy-dom
 import { StrictMode } from 'react'
+import { toast } from 'sonner'
+import userEvent from '@testing-library/user-event'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
@@ -14,22 +16,20 @@ import { useAppStore } from '@/store'
 import { applyAgentPermissionMode } from '../../../../shared/tui-agent-permissions'
 import { createGlobalSettingsFixture } from '../../../../shared/global-settings-test-fixture'
 
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), dismiss: vi.fn() } }))
+
 const transport = vi.hoisted(() => ({
   read: vi.fn(),
   mutate: vi.fn(),
   detection: vi.fn(),
   auto: vi.fn(),
-  native: vi.fn(),
-  undo: vi.fn()
+  native: vi.fn()
 }))
 vi.mock('./agent-launch-settings-transport', () => ({
   readHostAgentLaunchSettings: transport.read,
-  mutateHostAgentLaunchSettings: async (...args: unknown[]) => ({
-    settings: await transport.mutate(...args)
-  }),
+  mutateHostAgentLaunchSettings: transport.mutate,
   hostSupportsAutoPermissions: transport.auto,
-  hostSupportsNativeChatPermissions: transport.native,
-  hostSupportsPermissionResetUndo: transport.undo
+  hostSupportsNativeChatPermissions: transport.native
 }))
 vi.mock('@/hooks/useDetectedAgents', () => ({
   useDetectedAgents: (target: unknown) => {
@@ -64,12 +64,12 @@ const pane = (revision: number) => (
 
 afterEach(cleanup)
 beforeEach(() => {
+  vi.mocked(toast.success).mockClear()
   transport.read.mockReset().mockResolvedValue(host())
   transport.mutate.mockReset().mockResolvedValue(host())
   transport.detection.mockClear()
   transport.auto.mockReset().mockResolvedValue(true)
   transport.native.mockReset().mockResolvedValue(true)
-  transport.undo.mockReset().mockResolvedValue(false)
 })
 
 describe('host launch settings form', () => {
@@ -501,4 +501,51 @@ describe('host launch settings form', () => {
     await screen.findByDisplayValue('--host-marker')
     expect(transport.read.mock.calls.at(-1)?.[1].aborted).toBe(false)
   })
+})
+
+it('shows vanished and retained overrides together and only makes the retained agent inherit', async () => {
+  const before = {
+    agentPermissionDefault: 'full-access' as const,
+    agentPermissionOverrides: { codex: 'full-access' as const, claude: 'full-access' as const }
+  }
+  transport.read.mockResolvedValue(projectAgentLaunchSettings(before))
+  transport.mutate
+    .mockResolvedValueOnce(
+      projectAgentLaunchSettings({
+        ...before,
+        agentPermissionDefault: 'ask',
+        agentPermissionOverrides: { claude: 'full-access' }
+      })
+    )
+    .mockResolvedValueOnce(projectAgentLaunchSettings({ agentPermissionDefault: 'ask' }))
+  render(pane(17))
+  const user = userEvent.setup()
+  await screen.findByRole('button', { name: 'Permissions' })
+  await user.click(screen.getByRole('button', { name: 'Permissions' }))
+  await screen.findByRole('menuitemradio', { name: /Ask for approval/ })
+  await user.click(screen.getByRole('menuitemradio', { name: /Ask for approval/ }))
+  await waitFor(() => expect(transport.mutate).toHaveBeenCalledTimes(1))
+  await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1))
+  expect(vi.mocked(toast.success).mock.calls[0]?.[0]).toBe('1 agent still uses their own setting')
+  const options = vi.mocked(toast.success).mock.calls[0]?.[1]
+  const description = options?.description
+  const details = render(typeof description === 'function' ? description() : description)
+  expect(details.container.textContent).toContain('Claude · Full access')
+  expect(details.container.textContent).toContain('Codex now follows Ask for approval')
+  const action = options?.action
+  if (
+    !action ||
+    typeof action !== 'object' ||
+    !('onClick' in action) ||
+    typeof action.onClick !== 'function'
+  ) {
+    throw new Error('Missing follow action')
+  }
+  render(<button onClick={action.onClick}>Follow host notice</button>)
+  fireEvent.click(screen.getByRole('button', { name: 'Follow host notice' }))
+  await waitFor(() => expect(transport.mutate).toHaveBeenCalledTimes(2))
+  expect(transport.mutate.mock.calls.map((call) => call[1])).toEqual([
+    { type: 'permission', choice: 'ask' },
+    { type: 'permission', agent: 'claude', choice: 'default' }
+  ])
 })

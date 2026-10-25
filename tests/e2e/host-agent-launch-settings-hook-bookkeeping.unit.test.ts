@@ -28,8 +28,7 @@ vi.mock('../../src/renderer/src/components/settings/agent-launch-settings-transp
   readHostAgentLaunchSettings: transport.read,
   mutateHostAgentLaunchSettings: transport.mutate,
   hostSupportsAutoPermissions: async () => true,
-  hostSupportsNativeChatPermissions: async () => true,
-  hostSupportsPermissionResetUndo: async () => false
+  hostSupportsNativeChatPermissions: async () => true
 }))
 vi.mock('@/hooks/useDetectedAgents', () => ({
   useDetectedAgents: () => ({

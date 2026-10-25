@@ -138,6 +138,54 @@ describe('terminal launch composes the stored choice', () => {
   })
 })
 
+it.each([false, true])(
+  'keeps migration-owned and hand-set choices across global writes (legacy %s)',
+  (old) => {
+    let settings: AgentLaunchSettingsSource = migrateAgentPermissionChoice(
+      legacy({
+        codex: '--approve-for-me',
+        claude: '--dangerously-skip-permissions',
+        gemini: '',
+        grok: ''
+      })
+    )
+    settings = {
+      ...settings,
+      agentPermissionOverrides: { ...settings.agentPermissionOverrides, codex: 'ask' }
+    }
+    const original = { ...settings.agentPermissionOverrides }
+    expect(Object.values(original).filter((value) => value === 'own').length).toBeGreaterThan(1)
+    for (const [choice, mode] of [
+      ['ask', 'manual'],
+      ['auto', 'auto'],
+      ['auto', 'auto'],
+      ['full-access', 'yolo']
+    ] as const) {
+      const before = settings
+      settings = {
+        ...settings,
+        ...agentLaunchSettingsMutationUpdates(
+          settings,
+          old ? { type: 'permissions', mode } : { type: 'permission', choice },
+          'linux'
+        )
+      }
+      expect(settings.agentPermissionOverrides).toMatchObject(original)
+      expect(settings.agentPermissionOverrides).toMatchObject(before.agentPermissionOverrides ?? {})
+    }
+    expect(
+      applyAllAgentsPermission({ agentPermissionDefault: 'auto' }, 'auto').agentPermissionOverrides
+    ).toEqual({})
+    expect(() =>
+      agentLaunchSettingsMutationUpdates(settings, {
+        type: 'permission',
+        agent: 'gemini',
+        choice: 'ask'
+      })
+    ).toThrow('This agent does not offer that permission')
+  }
+)
+
 describe('older clients against a host with the stored choice', () => {
   const host = {
     ...migrateAgentPermissionChoice(legacy({ codex: '--approve-for-me --search' })),

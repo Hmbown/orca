@@ -1,15 +1,11 @@
 import { toast } from 'sonner'
 import { getAgentLabel } from '@/lib/agent-catalog'
 import type { TuiAgent } from '../../../../shared/tui-agent'
-import {
-  agentPermissionResetEntries,
-  wholeAgentEnvironmentUpdates
-} from '../../../../shared/agent-launch-permission-updates'
+import { wholeAgentEnvironmentUpdates } from '../../../../shared/agent-launch-permission-updates'
 import { useRef } from 'react'
 import { useAppStore } from '@/store'
 import {
   agentLaunchSettingsMutationUpdates,
-  type AgentPermissionResetEntry,
   projectAgentLaunchSettings,
   type AgentLaunchSettingsMutation
 } from '../../../../shared/agent-launch-settings'
@@ -24,7 +20,10 @@ import { SettingsHostScopeUnavailableNotice } from './SettingsHostScopePicker'
 import type { SettingsHostScope } from './settings-host-scope'
 import { runtimeTargetEnvironmentId } from '@/runtime/runtime-client-target'
 import { translate } from '@/i18n/i18n'
-import { useAgentPermissionResetNotice } from './agent-permission-reset-notice'
+import {
+  useAgentPermissionOverrideNotice,
+  type SelectPermissionOverrides
+} from './agent-permission-override-notice'
 
 export function AgentLaunchSettingsSection({
   settings,
@@ -76,17 +75,27 @@ function LocalAgentLaunchSettings({
   updateSettings: (updates: Partial<GlobalSettings>) => void | Promise<void>
   renderPermissions: AgentPermissionsRenderer
 }): React.JSX.Element {
-  const notifyReset = useAgentPermissionResetNotice()
+  const notify = useAgentPermissionOverrideNotice()
   const tail = useRef<Promise<void> | null>(null)
-  const apply = (
+  const enqueue = (operation: () => Promise<void>): Promise<void> => {
+    const write = (tail.current ?? Promise.resolve()).catch(() => {}).then(operation)
+    tail.current = write
+    return write
+  }
+  const current = () => useAppStore.getState().settings ?? settings
+  const permissions = () => {
+    const latest = current()
+    return latest.agentPermissionDefault
+      ? { default: latest.agentPermissionDefault, overrides: latest.agentPermissionOverrides ?? {} }
+      : undefined
+  }
+  const write = (
     agent: TuiAgent | undefined,
     compute: (current: GlobalSettings, platform: NodeJS.Platform) => Partial<GlobalSettings>
   ): Promise<void> => {
-    const write = (tail.current ?? Promise.resolve())
-      .catch(() => {})
+    return Promise.resolve()
       .then(async () => {
-        const current = useAppStore.getState().settings ?? settings
-        const updates = compute(current, window.api.platform.get().platform)
+        const updates = compute(current(), window.api.platform.get().platform)
         if (Object.keys(updates).length) {
           await useAppStore.getState().updateSettingsOrThrow(updates)
         }
@@ -106,26 +115,32 @@ function LocalAgentLaunchSettings({
         )
         throw error
       })
-    tail.current = write
-    return write
   }
-  const mutate = (mutation: AgentLaunchSettingsMutation): Promise<void> => {
-    let resets: AgentPermissionResetEntry[] = []
-    return apply(
-      mutation.type !== 'default' && 'agent' in mutation ? mutation.agent : undefined,
-      (current, platform) => {
-        const updates = agentLaunchSettingsMutationUpdates(current, mutation, platform)
-        resets = agentPermissionResetEntries(current, mutation, { ...current, ...updates })
-        return updates
-      }
-    ).then(() =>
-      notifyReset(resets, mutation, async () => {
-        for (const { agent, previousChoice } of resets) {
-          await mutate({ type: 'permission', agent, choice: previousChoice })
+  const apply = (agent: TuiAgent | undefined, compute: Parameters<typeof write>[1]) =>
+    enqueue(() => write(agent, compute))
+  const follow = (select: SelectPermissionOverrides) =>
+    enqueue(async () => {
+      for (const agent of select(permissions())) {
+        if (select(permissions()).includes(agent)) {
+          await write(agent, (latest, platform) =>
+            agentLaunchSettingsMutationUpdates(
+              latest,
+              { type: 'permission', agent, choice: 'default' },
+              platform
+            )
+          )
         }
-      })
-    )
-  }
+      }
+    })
+  const mutate = (mutation: AgentLaunchSettingsMutation): Promise<void> =>
+    enqueue(async () => {
+      const before = permissions()
+      await write(
+        mutation.type !== 'default' && 'agent' in mutation ? mutation.agent : undefined,
+        (latest, platform) => agentLaunchSettingsMutationUpdates(latest, mutation, platform)
+      )
+      notify(before, permissions(), mutation, follow)
+    })
   const saveEnvironment = (agent: TuiAgent, requested: Record<string, string>): Promise<void> =>
     apply(agent, (current, platform) =>
       wholeAgentEnvironmentUpdates(current, agent, requested, platform)
