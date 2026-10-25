@@ -26,7 +26,7 @@ export type PaneSpawnOperation = {
   }
 }
 
-// Why: a window save can replay the binding the operation just proved dead; that is not an owner.
+// A delayed window save can replay a proven-dead binding without creating a new owner.
 export function isAbsentBindingReplay(
   absent: AbsentPaneBinding | undefined,
   ptyId: string,

@@ -6,7 +6,6 @@ import { makePaneSpawnReservationKey } from '../pane/spawn-reservation'
 import type { PtyIpcSpawnState } from './spawn-state'
 import type { PtySpawnIpcArgs } from './spawn-types'
 
-/** The pane key a spawn names before preflight; null when it names no stable pane. */
 export function resolveEarlyPaneKey(args: PtySpawnIpcArgs): string | null {
   return typeof args.worktreeId === 'string' ? resolvePaneCoordinates(args) : null
 }
@@ -17,8 +16,7 @@ export function resolveEarlyPaneSpawnReservationKey(args: PtySpawnIpcArgs): stri
 
 export async function checkPtyIpcLaunchPane(ctx: PtyIpcSpawnState): Promise<void> {
   const args = ctx.args
-  // A pane an agent launch laid out attaches to its agent or says why it can't, never runs a shell.
-  // A replacing spawn already holds the pane: the user restarted it, and that is theirs to run.
+  // Launch panes adopt their agent instead of starting a shell; explicit restarts already own the reservation.
   const launchPaneKey = ctx.paneSpawnReservation ? null : resolveEarlyPaneKey(args)
   const launchVerdict =
     launchPaneKey && args.worktreeId && args.tabId && args.leafId
@@ -34,7 +32,6 @@ export async function checkPtyIpcLaunchPane(ctx: PtyIpcSpawnState): Promise<void
       : null
   if (launchVerdict && args.worktreeId && args.tabId && args.leafId) {
     const verdict = await launchVerdict
-    // The window keeps a final verdict on the tab, clears a settled one, takes a withdrawn pane back.
     ctx.deps.runtime?.reportAgentLaunchPaneVerdict?.(
       { worktreeId: args.worktreeId, tabId: args.tabId, leafId: args.leafId },
       verdict

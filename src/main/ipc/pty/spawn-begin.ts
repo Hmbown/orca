@@ -17,6 +17,7 @@ export async function beginPtySpawn(
   renderer?: boolean
 ): Promise<AdoptStablePaneResult | null> {
   const args = ctx.args
+  // Capture lifecycle and home routes once, before startup can yield.
   ctx.codexHomeLaunchStartedAt = !args.connectionId ? new Date() : undefined
   ctx.codexHomeLaunchStartedSequence = !args.connectionId
     ? allocatePtyLifecycleSequence()

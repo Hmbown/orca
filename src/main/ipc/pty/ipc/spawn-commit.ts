@@ -97,8 +97,7 @@ function ipcSpawnResponse(ctx: PtyIpcSpawnState) {
       ? { launchConfig: ctx.effectiveLaunchConfig }
       : {}),
     ...(startupCwdFallback ? { startupCwdFallback } : {}),
-    // Why: the pane asked to resume and got a fresh session instead; only the
-    // renderer can say so, and a reattach never ran this launch command.
+    // Only a fresh launch can report dropped resume; reattach never ran this command.
     ...(ctx.codexResumeLaunch.notifyResumeUnavailable && !ctx.result.isReattach
       ? { agentResumeUnavailable: true as const }
       : {})

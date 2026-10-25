@@ -170,7 +170,7 @@ describe('registerPtyHandlers', () => {
       worktreeId: 'wt-1'
     })
 
-    // Why: #7587 — the runtime can only back a stalled mobile create if the spawn threads {tabId, leafId}.
+    // Mobile-create recovery needs tab/leaf identity at runtime registration (#7587).
     expect(runtime.registerPty).toHaveBeenCalledWith(
       expect.any(String),
       'wt-1',
@@ -309,7 +309,7 @@ describe('registerPtyHandlers', () => {
       worktreeId: 'wt-1'
     })
 
-    // Why: legacy numeric pane ids (`pane:N`) aren't leaf ids, so the seam passes a clean `undefined` (no fabricated binding).
+    // Legacy pane:N IDs are not leaf identities; do not fabricate a binding.
     expect(runtime.registerPty).toHaveBeenCalledWith(
       expect.any(String),
       'wt-1',

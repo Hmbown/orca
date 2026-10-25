@@ -9,7 +9,6 @@ import { normalizeNodePtySpawnError } from './provider/liveness'
 import { restoreProvisionalPtySize, type PtySpawnSizeSeed } from './spawn-options-assembly'
 import { clearProviderPtyState } from './provider/state-cleanup'
 
-/** What both spawn lanes' execute step claims before the provider call, under the same names. */
 type PtySpawnExecuteState = {
   deps: { runtime?: OrcaRuntimeService }
   isClaudeLaunch: boolean
@@ -21,7 +20,6 @@ type PtySpawnExecuteState = {
   rejectedRegistrationCandidate: PtySpawnResult | null
 }
 
-/** Undoes what the execute step claimed for a start that threw, and returns the error to rethrow. */
 export function failPtySpawnExecute(
   ctx: PtySpawnExecuteState,
   err: unknown,
@@ -59,7 +57,7 @@ export function failPtySpawnExecute(
   }
   // Restore the pre-start grid after teardown, which also clears its provisional cache entry.
   restoreProvisionalPtySize(ctx, { exitedBeforeSpawnReply })
-  // Why: telemetry-plan.md§agent_error — attribute the error to the threaded agent_kind, else sniff the command for `claude`; raw messages are dropped at the validator boundary.
+  // Attribute validated agent identity; telemetry never receives raw provider errors.
   const threadedKind =
     lane.telemetry?.agent_kind !== undefined
       ? agentKindSchema.safeParse(lane.telemetry.agent_kind)

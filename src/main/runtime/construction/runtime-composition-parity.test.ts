@@ -163,6 +163,11 @@ const DECLARED_HOST_DIFFERENCES: readonly DeclaredDifference[] = [
     reason: 'Browser profiles live in Chromium sessions; orcad pages carry profile ids only.'
   },
   {
+    wiring: 'host:setManagedBrowserProfileDeleter',
+    missingOn: 'orcad',
+    reason: 'Managed profiles live in Chromium sessions; orcad has none to delete on removal.'
+  },
+  {
     wiring: 'host:setDesktopBrowserBridgeHostEnabled',
     missingOn: 'electron',
     reason: 'The desktop hosts browser pages itself; orcad enables the bridge to a desktop.'
@@ -485,7 +490,7 @@ describe('runtime composition parity (Electron vs orcad)', () => {
   })
 
   // #30731: orcad once installed a browser factory that could not place pages on a desktop.
-  it('installs a browser factory on both roots that hosts pages on a paired desktop', () => {
+  it('wires the browser factory and client-hosting options on both roots', () => {
     const installs: Record<Root, { root: string; call: string; file: string; option: RegExp }> = {
       electron: {
         root: 'src/main/startup/main-process-preflight.ts',

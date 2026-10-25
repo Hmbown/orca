@@ -29,7 +29,6 @@ import { reportRuntimeResumeOutcome } from './runtime/spawn-commit-response'
 import { savePtySpawnPaneBinding, type PtySpawnPaneBinding } from './spawn-commit-binding'
 import { publishCommittedPtySpawn, type PtySpawnPaneKeyAliases } from './spawn-commit-publication'
 
-/** Spawn state both lanes carry; the commit reads it and settles the slots it owns. */
 export type PtySpawnCommitState = {
   deps: {
     runtime?: OrcaRuntimeService
@@ -67,10 +66,11 @@ export type PtySpawnCommitState = {
   codexSelectionTarget: CodexAccountSelectionTarget
   codexHomeLaunchStartedAt: Date | undefined
   codexHomeLaunchStartedSequence: number | undefined
+  /** Before the provider started anything, so no output of this spawn's process predates it. */
+  spawnRequestedAt?: number
   reattachedCodexHomeRoutes: Map<string, CodexPaneHomeRoute | null>
   launchCommand: string | undefined
   preSpawnHiddenMarkId: string | null
-  /** Window-only slots; the host lane has none of them. */
   replacedPaneOwner?: ReplacedPaneOwner | null
   agentTeamsLeaderHandle?: string | null
 }
@@ -97,11 +97,10 @@ export type PtySpawnCommitInput = {
   paneKey: string | null
   paneKeyAliases?: PtySpawnPaneKeyAliases
   resumeArgvDropped: boolean
-  /** TEMPORARY (rows 14-18): the window reports its base env, the host its assembled env. */
+  /** TEMPORARY (rows 14–18): window reports base env, host assembled env; launch-env follow-up. */
   codexLaunchEnv: Record<string, string> | undefined
   initiallyHidden: boolean
-  /** TEMPORARY (attachment-derived delivery lane): the renderer-scoped mark is refreshed here;
-   *  the runtime-owned one is marked by the host runner after this commit resolves. */
+  /** TEMPORARY: renderer marks refresh here, host marks after commit; terminal-transport follow-up. */
   hiddenDelivery: 'renderer-scoped' | 'runtime-owned'
   response: PtySpawnOutcome['result']
 }
@@ -145,7 +144,7 @@ export async function commitPtySpawn(input: PtySpawnCommitInput): Promise<PtySpa
       result.id,
       registration.worktreeId,
       null,
-      // Why: pass validated pane identity so a throttled mobile create publishes its surface main-side instead of destroying the live PTY (#7587); bound the untrusted tabId.
+      // Validate pane identity so throttled mobile creation retains its live PTY surface (#7587).
       typeof tabId === 'string' &&
         isValidTerminalTabId(tabId) &&
         tabId.length <= 512 &&
@@ -197,7 +196,7 @@ async function commitAdoptedAgentSession(
   const { state } = input
   const { result } = state
   const runtime = state.deps.runtime
-  // Why: an adopted reply can omit isReattach; derive it once so the size commit and the reservation agree.
+  // Adoption proves attach even without the reply flag; size commit and joiners must agree.
   const adoptedResult = { ...result, isReattach: true }
   const { surface } = adopted.owner
   const rejectedRegistration = registerPersistedPtySpawn(

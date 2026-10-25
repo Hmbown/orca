@@ -84,8 +84,7 @@ export async function executePtySpawn(
       }
     }
     if (args.agentSessionEnsure && !ctx.preAdoptedStablePane) {
-      // Why: daemon-backed claims can outlive this controller; import all
-      // proven owners before deciding that an identity is absent.
+      // Claims can outlive this controller; import authoritative owner listings before deciding absence.
       await reconcileAgentSessionOwnerListings()
       const recoveredOwner = agentSessionOwners.find(args.agentSessionEnsure.claim)
       if (recoveredOwner && ctx.pendingRegistrationPtyId !== recoveredOwner.ptyId) {
@@ -110,7 +109,7 @@ export async function executePtySpawn(
           assertClientStillConnected()
           providerResult = await ctx.provider.spawn(ctx.spawnOptions)
           ctx.rejectedRegistrationCandidate = providerResult
-          // Why: a successful lower-owner return proves physical work committed even if admission sees an early exit.
+          // Lower-owner success proves physical commit even when registration observes an early exit.
           facts.reportPtySpawnCommitted?.()
           assertSpawnReplyWasLive(providerResult)
           ctx.deps.runtime?.assertPtyRegistrationAllowed?.(
@@ -118,8 +117,7 @@ export async function executePtySpawn(
             providerResult.incarnationId
           )
           if (providerResult.incarnationId) {
-            // Why: local providers cannot serialize controller claims, so liveness proof
-            // needs the exact incarnation before the registry promotes the new owner.
+            // In-process providers cannot list controller claims; record exact incarnation before ownership promotion.
             ptyIncarnationById.set(providerResult.id, providerResult.incarnationId)
           }
           const providerEnsure = providerResult.agentSessionEnsure
@@ -136,7 +134,7 @@ export async function executePtySpawn(
         isLive: async (owner) => {
           const ownerProvider = tryGetProviderForPty(owner.ptyId)
           if (!ownerProvider) {
-            // Why: an owner on a host this process cannot reach is unknown, never absent.
+            // Unreachable execution owners remain unknown.
             throw new Error('execution_owner_unavailable')
           }
           return await isProviderAgentSessionOwnerLive(ownerProvider, owner)
@@ -149,8 +147,7 @@ export async function executePtySpawn(
       ctx.result = providerResult ?? {
         id: ensured.owner.ptyId,
         isReattach: true,
-        // Why: adoption from an authoritative listing must preserve the
-        // incarnation proof used to reject a delayed exit from an older process.
+        // Preserve listing-proven incarnation to reject delayed exits from older processes.
         incarnationId: ptyIncarnationById.get(ensured.owner.ptyId)
       }
       ctx.result.agentSessionEnsure = ensured
@@ -179,7 +176,7 @@ export async function executePtySpawn(
       ctx.pendingRegistrationPtyId = ctx.result.id
     }
     assertSpawnReplyWasLive(ctx.result)
-    // Why: admission precedes sequence/context state and every durable publication below.
+    // Admit registration before mutating sequence/context or publishing durable state.
     if (
       ctx.pendingRegistrationClaim &&
       !ctx.deps.runtime?.narrowPtyRegistration(
@@ -194,9 +191,7 @@ export async function executePtySpawn(
     if (ctx.result.providerSequence) {
       const runtimeSequenceBeforeReconcile =
         ctx.deps.runtime?.getPtyOutputSequence?.(ctx.result.id) ?? 0
-      // Why kept: this is the reattach boundary in the RENDERER's sequence
-      // domain, and the daemon snapshot's kitty flags mean nothing without
-      // the boundary they were proven at.
+      // Keyboard flags require the snapshot boundary translated into the renderer sequence domain.
       const translatedSnapshotSeq =
         ctx.deps.runtime?.synchronizePtyOutputSequenceFromProvider?.(
           ctx.result.id,

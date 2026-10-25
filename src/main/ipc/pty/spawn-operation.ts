@@ -70,6 +70,7 @@ export async function runPtySpawn<State extends PtySpawnOperationState>(
   ctx.preAdoptedStablePane = args.adoptedStablePane ?? null
   ctx.paneSpawnOperation = args.paneSpawnOperation
   const replacementKey = adapter.replace ? resolveEarlyPaneSpawnReservationKey(args) : null
+  // Keep replacement authority across stopping the previous process.
   if (replacementKey) {
     ctx.paneSpawnReservation = await reserveIdlePaneSpawn(replacementKey)
     ctx.paneSpawnReservationKey = replacementKey
@@ -199,6 +200,7 @@ export async function runPtySpawn<State extends PtySpawnOperationState>(
     if (ctx.replacedPaneOwner) {
       await releaseStoppedPaneBinding(ctx.deps.store, ctx.replacedPaneOwner)
     }
+    // Every failure settles the exact reservation so later starts can acquire it.
     rejectPaneSpawnReservation(ctx.paneSpawnReservationKey, ctx.paneSpawnReservation, error)
     throw error
   } finally {

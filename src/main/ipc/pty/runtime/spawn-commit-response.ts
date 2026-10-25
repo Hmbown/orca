@@ -19,10 +19,7 @@ export function resumeOutcomeOf(ctx: RuntimeResumeOutcomeState): PaneResumeOutco
   return ctx.codexResumeArgvDropped ? null : 'restored'
 }
 
-/**
- * Switch point: tells the start whether it resumed the pane's agent before the pane's bind is
- * written, so the frame that first shows the new terminal carries the outcome too.
- */
+/** Publish resume outcome before binding so the first frame with the new terminal includes it. */
 export function reportRuntimeResumeOutcome(ctx: RuntimeResumeOutcomeState): void {
   const outcome =
     ORCA_LAYOUT_OWNER_IS_MAIN && ctx.args.onResumeOutcome ? resumeOutcomeOf(ctx) : null

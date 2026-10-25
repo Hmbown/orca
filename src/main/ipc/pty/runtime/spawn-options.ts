@@ -15,7 +15,6 @@ import {
 import type { RuntimePtySpawnState } from './spawn-state'
 import { prepareAntigravityAccountForLaunch } from '../../../antigravity/native-account-launch'
 
-/** Host lane: the shared spawn options plus this lane's agent-session claims and pane join. */
 export async function buildRuntimePtySpawnOptions(
   ctx: RuntimePtySpawnState
 ): Promise<
@@ -96,8 +95,7 @@ export async function buildRuntimePtySpawnOptions(
     sessionId: ctx.sessionId,
     sessionAppId: ctx.effectiveSessionAppId,
     isFreshSessionId: ctx.ownsNewIncarnation,
-    // Why false: runtime callers (CLI, headless serve) have no hidden pane to report, so a
-    // cached size is the only source that can outrank their requested grid here.
+    // Host requests, including defaults, are intentional; only a live cached grid outranks them.
     requestIsUnmeasured: false,
     cols: args.cols,
     rows: args.rows
@@ -107,7 +105,7 @@ export async function buildRuntimePtySpawnOptions(
     args.agentSessionEnsure &&
     (await (ctx.provider as IPtyProvider).supportsAgentSessionClaims?.()) === false
   ) {
-    // Why: runtime routing must select legacy before dispatch; never downgrade here after it began.
+    // Select legacy routing before dispatch; never downgrade after work begins.
     throw new Error('agent_session_claim_unavailable')
   }
   if (
@@ -130,7 +128,7 @@ export async function buildRuntimePtySpawnOptions(
     args.onPtySpawnCommitted &&
     (ctx.provider instanceof LocalPtyProvider || routesFreshSpawnsToLocalProvider(ctx.provider))
   ) {
-    // Why: local fallback has no lower operation ledger, so commit must be reported at native spawn.
+    // Local fallback lacks an operation ledger; report commit at native spawn.
     ctx.spawnOptions.onPtySpawnCommitted = ctx.reportPtySpawnCommitted
   }
 
