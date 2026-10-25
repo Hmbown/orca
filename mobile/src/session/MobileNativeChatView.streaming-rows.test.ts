@@ -1,9 +1,16 @@
-import { createElement } from 'react'
-import { act, create, type ReactTestInstance, type ReactTestRenderer } from 'react-test-renderer'
+import { createElement, useMemo } from 'react'
+import { performance } from 'node:perf_hooks'
+import { readFileSync } from 'node:fs'
+import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, expect, it, vi } from 'vitest'
-import { agentJournalSubmissionKey } from '../../../src/shared/agent-session-journal-item-key'
+import type { AgentJournalRenderItem } from '../../../src/shared/agent-session-journal-types'
+import { projectStructuredAgentSessionMessages } from '../../../src/shared/structured-agent-session-message-projection'
+import { agentJournalTurnBody } from '../../../src/shared/agent-session-turn-record'
+import { foldMobileNativeChatMessages } from './mobile-native-chat-render-data'
+import { useMobileNativeChatFoldReuse } from './mobile-native-chat-fold-reuse'
+import { useMobileStructuredAgentTurnTiming } from './use-mobile-structured-agent-turn-timing'
+import { MobileNativeChatPageList } from './MobileNativeChatPageList'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
-import type { NativeChatTurnJournal } from '../../../src/shared/native-chat-turn-membership'
 import { MobileNativeChatView } from './MobileNativeChatView'
 
 vi.mock('react-native', async () => {
@@ -14,7 +21,8 @@ vi.mock('react-native', async () => {
       React.useImperativeHandle(ref, () => ({ scrollToEnd: vi.fn(), scrollToOffset: vi.fn() }), [])
       return React.createElement('FlatList', props)
     }),
-    Platform: { OS: 'ios' },
+    ScrollView: 'ScrollView',
+    Platform: { OS: 'web' },
     Pressable: 'Pressable',
     StyleSheet: { create: (styles: unknown) => styles, hairlineWidth: 1 },
     Text: 'Text',
@@ -38,7 +46,16 @@ vi.mock('lucide-react-native', () => ({
   ChevronsUpDown: 'ChevronsUpDown',
   Square: 'Square'
 }))
-vi.mock('./MobileNativeChatMessage', () => ({ MobileNativeChatMessage: 'ChatMessage' }))
+const rendered = vi.hoisted(() => new Map<string, number>())
+vi.mock('./MobileNativeChatMessage', async () => {
+  const React = await import('react')
+  return {
+    MobileNativeChatMessage: React.memo((props: { message: NativeChatMessage }) => {
+      rendered.set(props.message.id, (rendered.get(props.message.id) ?? 0) + 1)
+      return React.createElement('ChatMessage', props)
+    })
+  }
+})
 vi.mock('./MobileNativeChatPromptCard', () => ({ MobileNativeChatPromptCard: 'PromptCard' }))
 vi.mock('./MobileNativeChatAsk', () => ({ MobileNativeChatAsk: 'ChatAsk' }))
 vi.mock('./MobileNativeChatPermission', () => ({ MobileNativeChatPermission: 'ChatPermission' }))
@@ -50,108 +67,211 @@ vi.mock('./MobileAgentWorkingIndicator', () => ({
 vi.mock('./MobileNativeChatLiveLine', () => ({ MobileNativeChatLiveLine: 'LiveStatus' }))
 vi.mock('./MobileNativeChatComposer', () => ({ MobileNativeChatComposer: 'Composer' }))
 
-function row(id: string, role: NativeChatMessage['role'], text: string): NativeChatMessage {
-  return { id, role, blocks: [{ type: 'text', text }], timestamp: 0, source: 'transcript' }
+type ViewProps = Parameters<typeof MobileNativeChatView>[0]
+const stable: Pick<
+  ViewProps,
+  | 'onSend'
+  | 'sendSurfaceId'
+  | 'getSendCompletionGeneration'
+  | 'getComposerEditGeneration'
+  | 'composerText'
+  | 'onComposerTextChange'
+  | 'pending'
+  | 'imagePreviewsByMessageId'
+> = {
+  onSend: async () => true,
+  sendSurfaceId: 'perf-chat',
+  getSendCompletionGeneration: () => 0,
+  getComposerEditGeneration: () => 0,
+  composerText: '',
+  onComposerTextChange: () => {},
+  pending: [
+    {
+      id: 'pending',
+      text: 'follow up',
+      images: ['local:pending'],
+      sentAt: 10,
+      baselineTailMessageId: 'live-user'
+    }
+  ],
+  imagePreviewsByMessageId: { 'user-0': ['local:preview'] }
+}
+
+function Harness({
+  items,
+  corpus = []
+}: {
+  items: AgentJournalRenderItem[]
+  corpus?: NativeChatMessage[]
+}) {
+  const messages = useMemo(
+    () => [...corpus, ...projectStructuredAgentSessionMessages(items, [], [])],
+    [items, corpus]
+  )
+  const folded = useMobileNativeChatFoldReuse(
+    useMemo(() => foldMobileNativeChatMessages(messages, 'claude'), [messages]),
+    stable.sendSurfaceId
+  )
+  const timing = useMobileStructuredAgentTurnTiming(
+    { items, submissions: [], working: true },
+    'live'
+  )
+  return createElement(MobileNativeChatView, {
+    ...stable,
+    ...timing,
+    messages,
+    folded,
+    status: 'ready',
+    agent: 'claude',
+    streaming: null,
+    structuredActivityUi: true,
+    agentWorking: true
+  })
+}
+
+function journal(turns: number, text: string): AgentJournalRenderItem[] {
+  const items: AgentJournalRenderItem[] = []
+  const add = (itemId: string, body: AgentJournalRenderItem['body']) => {
+    items.push({
+      itemId,
+      body,
+      revision: 1,
+      sequence: items.length + 1,
+      observedAt: 1000 + items.length
+    })
+  }
+  for (let i = 0; i < turns; i++) {
+    const turnId = `turn-${i}`
+    add(`user-${i}`, {
+      kind: 'message',
+      role: 'user',
+      blocks: [{ type: 'text', text: 'inspect the code' }]
+    })
+    add(`tool-${i}`, {
+      kind: 'message',
+      role: 'assistant',
+      blocks: [
+        { type: 'tool-call', name: 'Read', callId: `call-${i}`, input: { path: 'index.ts' } },
+        { type: 'tool-result', callId: `call-${i}`, output: 'contents' }
+      ]
+    })
+    add(`reason-${i}`, {
+      kind: 'message',
+      role: 'reasoning',
+      blocks: [{ type: 'text', text: 'checking' }]
+    })
+    add(`answer-${i}`, {
+      kind: 'message',
+      role: 'assistant',
+      blocks: [{ type: 'text', text: 'finished' }]
+    })
+    add(
+      `lifecycle-${i}`,
+      agentJournalTurnBody({
+        turnId,
+        userItemId: `user-${i}`,
+        state: 'completed',
+        startedAt: 1000,
+        completedAt: 5000,
+        durationMs: 4000
+      })
+    )
+  }
+  add('live-user', { kind: 'message', role: 'user', blocks: [{ type: 'text', text: 'continue' }] })
+  add(
+    'live-turn',
+    agentJournalTurnBody({
+      turnId: 'live',
+      userItemId: 'live-user',
+      state: 'running',
+      startedAt: 6000
+    })
+  )
+  add('live-answer', { kind: 'message', role: 'assistant', blocks: [{ type: 'text', text }] })
+  return items
 }
 
 let renderer: ReactTestRenderer | null = null
-
 afterEach(() => {
   act(() => renderer?.unmount())
   renderer = null
+  rendered.clear()
 })
 
-function show(folded: NativeChatMessage[], turnJournal?: NativeChatTurnJournal): void {
-  const element = createElement(MobileNativeChatView, {
-    turnJournal,
-    messages: folded,
-    folded,
-    status: 'ready',
-    streaming: null,
-    structuredActivityUi: true,
-    agentWorking: true,
-    // The host rebuilds its settled-turn map on every batch, with equal values.
-    settledTurns: new Map([['u1', { startedAt: 1_000, workedSeconds: 4 }]]),
-    onSend: vi.fn().mockResolvedValue(true),
-    sendSurfaceId: 'tab-a',
-    getSendCompletionGeneration: () => 0,
-    getComposerEditGeneration: () => 0,
-    pending: [],
-    composerText: '',
-    onComposerTextChange: vi.fn()
-  })
-  act(() => {
-    if (renderer) {
-      renderer.update(element)
-    } else {
-      renderer = create(element)
-    }
-  })
-}
-
-function list(): ReactTestInstance {
-  return renderer!.root.find((node) => Object.is(node.type, 'FlatList'))
-}
-
-function settledStatus(): unknown {
-  const data: NativeChatMessage[] = list().props.data
-  return list().props.renderItem({ item: data[0], index: 0 }).props.turnStatus
-}
-
-it('keeps renderItem and settled rows while a structured reply streams', () => {
-  const history = [
-    row('u1', 'user', 'go'),
-    row('a1', 'assistant', 'done'),
-    row('u2', 'user', 'next')
-  ]
-  show([...history, row('a2', 'assistant', 'Hel')])
-  // A stable renderItem only spares unchanged cells when the list memoizes its renderer.
-  expect(list().props.strictMode).toBe(true)
-  const renderItem = list().props.renderItem
-  const status = settledStatus()
-  expect(status).toMatchObject({ workedSeconds: 4 })
-
-  show([...history, row('a2', 'assistant', 'Hello')])
-  expect(list().props.renderItem).toBe(renderItem)
-  expect(settledStatus()).toBe(status)
-
-  show([...history, row('a2', 'assistant', 'Hello'), row('u3', 'user', 'more')])
-  expect(list().props.renderItem).not.toBe(renderItem)
-  expect(settledStatus()).toBe(status)
-})
-
-it("redraws a not-sent row when the host's rejection arrives, keeping the others", () => {
-  const id = agentJournalSubmissionKey('lost')
-  const history = [
-    row('u1', 'user', 'go'),
-    row('a1', 'assistant', 'done'),
-    { ...row(id, 'user', 'next'), unsent: true as const }
-  ]
-  const noticeOf = (): unknown => {
-    const data: NativeChatMessage[] = list().props.data
-    const index = data.findIndex((message) => message.id === id)
-    return list().props.renderItem({ item: data[index], index }).props.unsentNotice
+function measure(turns: number, corpus: NativeChatMessage[] = []) {
+  // Retain every loaded row by reaching the page's scroll-driven draw expansion.
+  const scroller = {
+    scrollTop: 0,
+    scrollHeight: 100,
+    clientHeight: 100,
+    addEventListener() {},
+    removeEventListener() {},
+    querySelectorAll: () => []
   }
-  show(history, { items: [], submissions: [] })
-  const status = settledStatus()
-  expect(noticeOf()).toBeUndefined()
-
-  show(history, {
-    items: [],
-    submissions: [
-      {
-        clientMessageId: 'lost',
-        fence: 1,
-        payloadFingerprint: 'lost',
-        dispatchState: 'rejected',
-        providerItemId: null,
-        reason: null,
-        submittedAt: 1,
-        resolvedAt: 2
-      }
-    ]
+  const items = journal(turns, 'hello')
+  act(() => {
+    renderer = create(createElement(Harness, { items, corpus }), {
+      createNodeMock: (element) =>
+        element.type === 'ScrollView'
+          ? { getScrollableNode: () => scroller, getInnerViewNode: () => null }
+          : null
+    })
   })
+  expect(renderer!.root.findAllByType(MobileNativeChatPageList)).toHaveLength(1)
+  const mounted = renderer!.root.findAll((node) => Object.is(node.type, 'ChatMessage'))
+  expect(mounted.length).toBeGreaterThanOrEqual(turns * 4 + corpus.length)
+  expect(mounted.some((node) => node.props.workRun?.length > 1)).toBe(true)
+  const preview = mounted.find((node) => node.props.message.id === 'user-0')!
+  expect(preview.props.message.blocks).toContainEqual({ type: 'image-ref', url: 'local:preview' })
+  expect(mounted.some((node) => node.props.message.id === 'pending')).toBe(true)
+  const samples: { renders: number; ms: number; ids: string[] }[] = []
+  for (let batch = 0; batch < 20; batch++) {
+    rendered.clear()
+    const updated = items.map((item) =>
+      item.itemId === 'live-answer'
+        ? {
+            ...item,
+            revision: batch + 2,
+            body: {
+              kind: 'message' as const,
+              role: 'assistant' as const,
+              blocks: [{ type: 'text' as const, text: 'hello' + '.'.repeat(batch + 1) }]
+            }
+          }
+        : item
+    )
+    const start = performance.now()
+    act(() => renderer!.update(createElement(Harness, { items: updated, corpus })))
+    samples.push({
+      ms: performance.now() - start,
+      renders: [...rendered.values()].reduce((sum, n) => sum + n, 0),
+      ids: [...rendered.keys()]
+    })
+  }
+  const result = {
+    turns,
+    rows: mounted.length,
+    renders: samples.map((sample) => sample.renders),
+    meanMs: samples.reduce((sum, sample) => sum + sample.ms, 0) / samples.length
+  }
+  console.log('STREAM_PERF', JSON.stringify(result))
+  expect(
+    samples.every((sample) => sample.ids.length === 1 && sample.ids[0] === 'live-answer')
+  ).toBe(true)
+  expect(
+    renderer!.root
+      .findAll((node) => Object.is(node.type, 'ChatMessage'))
+      .find((node) => node.props.message.id === 'live-answer')!.props.message.blocks[0].text
+  ).toBe('hello' + '.'.repeat(20))
+}
 
-  expect(noticeOf()).toEqual(expect.any(String))
-  expect(settledStatus()).toBe(status)
-})
+it.each([10, 100])('bounds streaming renders at %i settled turns', (turns) => measure(turns))
+it.skipIf(!process.env.ORCA_CHAT_PERF_CORPUS)(
+  'measures the private real-scale transcript without committing it',
+  () => {
+    const corpus: NativeChatMessage[] = JSON.parse(
+      readFileSync(process.env.ORCA_CHAT_PERF_CORPUS!, 'utf8')
+    )
+    measure(10, corpus)
+  }
+)
