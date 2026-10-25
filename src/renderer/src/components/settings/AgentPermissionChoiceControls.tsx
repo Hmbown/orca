@@ -72,7 +72,7 @@ export function AllAgentsPermissionSetting({
               variant="outline"
               size="xs"
               aria-label={title}
-              className="max-w-full"
+              className="w-48 max-w-full justify-between"
             >
               {choice === null ? (
                 <span className="h-4" />
