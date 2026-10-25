@@ -15,7 +15,7 @@ vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
 vi.mock('./structured-agent-session-client', () => ({
   callStructuredAgentSession: async () => ({
     models: [{ id: 'model-a', label: 'Model A', isDefault: true, efforts: [] }],
-    current: { model: 'model-a', permissionMode: 'ask' }
+    current: { model: 'model-a', permissionMode: 'ask', reportedPermissionMode: 'ask' }
   }),
   subscribeStructuredAgentSessionStatus: async () => ({ unsubscribe: () => {} })
 }))
@@ -132,8 +132,13 @@ it.each([10, 100])(
       views.every((view) => {
         const picker = view.result.current.picker
         return (
-          picker?.kind.type === 'select' &&
-          picker.kind.choices.some((choice) => choice.value === 'own')
+          picker?.settable === true &&
+          picker.valueSource === 'reported' &&
+          picker.description === 'Ask for approval' &&
+          picker.kind.type === 'select' &&
+          picker.kind.currentValue === 'ask' &&
+          picker.kind.choices.some((choice) => choice.value === 'ask') &&
+          !picker.kind.choices.some((choice) => choice.value === 'own')
         )
       })
     ).toBe(true)
