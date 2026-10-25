@@ -349,13 +349,19 @@ it.each([1, 10, 100])(
   }
 )
 
-it.each(
-  (['omp', 'grok', 'opencode', 'opencode2'] as const).flatMap((agent) =>
-    [false, true].map((fullAccess) => ({ agent, fullAccess }))
-  )
-)(
-  'keeps $agent explicit controls tied to installed fullAccess=$fullAccess, not saved intent',
-  async ({ agent, fullAccess }) => {
+it.each([
+  ...(['omp', 'grok', 'opencode', 'opencode2'] as const).flatMap((agent) =>
+    (
+      [
+        { fullAccess: false, savedMode: 'full-access' },
+        { fullAccess: true, savedMode: 'ask' }
+      ] as const
+    ).map((policy) => ({ agent, ...policy }))
+  ),
+  { agent: 'omp' as const, fullAccess: false, savedMode: 'own' as const }
+])(
+  'keeps $agent saved $savedMode controls tied to installed fullAccess=$fullAccess, not saved intent',
+  async ({ agent, fullAccess, savedMode }) => {
     const spec = acpLaunchSpecFor(agent)
     if (!spec) {
       throw new Error('Production ACP spec is required')
@@ -382,7 +388,7 @@ it.each(
               'accountHomeVariable' in spec.account.pin
                 ? { variable: spec.account.pin.accountHomeVariable, path: '/accounts/acp' }
                 : { kind: 'opencode', locator: { kind: 'unmanaged' } },
-            options: { permissionMode: other }
+            options: { permissionMode: savedMode }
           })
         )
       ).toMatchObject({ ok: true })
@@ -397,7 +403,11 @@ it.each(
       await waitFor(() =>
         expect(rows().map((row) => row?.description)).toEqual([description, description])
       )
-      expect(store.getRecord(sessionId)?.permissionMode).toBe(other)
+      expect(store.getRecord(sessionId)?.permissionMode).toBe(savedMode)
+      expect((await host.readOptions(sessionId)).current).toMatchObject({
+        permissionMode: savedMode,
+        reportedPermissionMode: mode
+      })
       expect(host.readStatusSummary(sessionId)?.runtimePermission).toEqual({
         fence: currentFence,
         mode
