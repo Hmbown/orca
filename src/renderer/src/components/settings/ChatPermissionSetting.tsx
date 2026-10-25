@@ -58,11 +58,7 @@ export function ChatPermissionSetting({
             <NativeChatPermissionModePicker
               current={settings.nativeChatPermissionMode}
               modes={AGENT_CHAT_PERMISSION_MODES}
-              onSelect={(mode) => {
-                if (mode !== 'own') {
-                  updateSettings({ nativeChatPermissionMode: mode })
-                }
-              }}
+              onSelect={(mode) => updateSettings({ nativeChatPermissionMode: mode })}
             />
           )
         }
