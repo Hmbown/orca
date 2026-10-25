@@ -24,6 +24,7 @@ import { structuredClaudeLifecycleEvent } from '../../src/main/runtime/structure
 import {
   hostTestState,
   attachParams,
+  envelope,
   CALLER
 } from '../../src/main/native-chat/agent-session-wire/structured-agent-session-host-test-harness'
 import { HOST_TEST_SESSION as sessionId } from '../../src/main/native-chat/agent-session-wire/structured-agent-session-host-test-data'
@@ -134,6 +135,25 @@ it.each([1, 10, 100])(
         subscribe: (_method, _params, emit) => subscribe(emit),
         sendRequest: async (method) => ({ id: 'report-rpc', ok: true, result: await read(method) })
       }
+      const write = vi.fn()
+      write.mockImplementation(
+        async (_method, _fingerprint, fields: { key: string; value: string }) => {
+          const result = await host.setOption(CALLER, {
+            envelope: envelope('agentSession.setOption', fields),
+            ...fields
+          })
+          if (!result.ok) {
+            throw new Error(`Permission pick refused: ${result.refusal.code}`)
+          }
+          return result.value
+        }
+      )
+      const phoneWrite = vi.fn()
+      phoneWrite.mockImplementation(async (...args) => ({
+        status: 'accepted',
+        value: await write(...args),
+        sameFence: true
+      }))
       const target = { kind: 'local' } as const
       const common = { agent: 'claude' as const, sessionId, fence }
       const hooks = [
@@ -148,7 +168,7 @@ it.each([1, 10, 100])(
             turnId: null,
             unloadedTurnRevisions: undefined,
             hostOptionStamp: 'model|own',
-            mutate: vi.fn(async () => null)
+            mutate: write
           }),
         () =>
           useMobileStructuredAgentOptions({
@@ -162,14 +182,19 @@ it.each([1, 10, 100])(
               statusFeed: true,
               coherentModelCatalog: false
             },
-            mutate: vi.fn(async () => ({ status: 'rejected' as const }))
+            mutate: phoneWrite
           })
       ]
-      const views = hooks.flatMap((useOptions) =>
-        Array.from({ length: count }, () =>
-          renderHook(() => ({ optionSnapshot: useOptions().optionSnapshot }))
+      const mount = () =>
+        hooks.flatMap((useOptions) =>
+          Array.from({ length: count }, () =>
+            renderHook(() => {
+              const { optionSnapshot, setStructuredOption } = useOptions()
+              return { optionSnapshot, setStructuredOption }
+            })
+          )
         )
-      )
+      let views = mount()
       const descriptions = () =>
         views.map(
           (view) =>
@@ -223,6 +248,71 @@ it.each([1, 10, 100])(
       expect(sink.publish).not.toHaveBeenCalled()
       expect(onStatusChanged).not.toHaveBeenCalled()
       expect(store.getRecord(sessionId)?.permissionMode).toBe('own')
+      const desktop = views[0],
+        phone = views[count]
+      if (!desktop || !phone) {
+        throw new Error('Both mounted permission consumers are required')
+      }
+      await act(async () => {
+        expect(await desktop.result.current.setStructuredOption('permissionMode', 'ask')).toBe(true)
+      })
+      expect(store.getRecord(sessionId)?.permissionMode).toBe('ask')
+      expect(host.readStatusSummary(sessionId)?.runtimePermission).toEqual({
+        fence,
+        mode: 'ask'
+      })
+      expect((await host.readOptions(sessionId)).current).toMatchObject({
+        permissionMode: 'ask',
+        reportedPermissionMode: 'ask'
+      })
+      await waitFor(() => expect(descriptions()).toEqual(Array(count * 2).fill('Ask for approval')))
+      expect(
+        views.every(
+          (view) =>
+            view.result.current.optionSnapshot.find((row) => row.id === 'permissionMode')?.settable
+        )
+      ).toBe(true)
+      await act(async () => {
+        expect(
+          await phone.result.current.setStructuredOption('permissionMode', 'full-access')
+        ).toBe(true)
+      })
+      expect(write.mock.calls.map(([, , fields]) => fields)).toEqual([
+        { key: 'permissionMode', value: 'ask' },
+        { key: 'permissionMode', value: 'full-access' }
+      ])
+      expect(store.getRecord(sessionId)?.permissionMode).toBe('full-access')
+      expect(host.readStatusSummary(sessionId)?.runtimePermission).toEqual({
+        fence,
+        mode: 'ask'
+      })
+      views.forEach((view) => view.unmount())
+      views = mount()
+      await waitFor(() => expect(descriptions()).toEqual(Array(count * 2).fill('Ask for approval')))
+      expect((await host.readOptions(sessionId)).current).toMatchObject({
+        permissionMode: 'full-access',
+        reportedPermissionMode: 'ask'
+      })
+      await act(async () => {
+        claudeFrame(connection, {
+          ...frame,
+          permissionMode: 'bypassPermissions',
+          uuid: 'c1111111-1111-4111-8111-111111111111'
+        })
+        await Promise.all(settlements)
+      })
+      await waitFor(() => expect(descriptions()).toEqual(Array(count * 2).fill('Full access')))
+      expect(
+        views.every(
+          (view) =>
+            view.result.current.optionSnapshot.find((row) => row.id === 'permissionMode')?.settable
+        )
+      ).toBe(true)
+      expect((await host.readOptions(sessionId)).current).toMatchObject({
+        permissionMode: 'full-access',
+        reportedPermissionMode: 'full-access'
+      })
+      expect(store.getRecord(sessionId)?.lease.runtimeFence).toBe(fence)
       await act(async () => {
         subscriptions.forEach((dispose) => dispose())
       })

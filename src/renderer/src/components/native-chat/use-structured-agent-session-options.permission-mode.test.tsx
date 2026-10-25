@@ -1,7 +1,9 @@
 import { setLocalRuntimeCapabilitiesForTests } from '@/runtime/local-runtime-capabilities'
-import { AGENT_SESSION_PERMISSION_OWN_RUNTIME_CAPABILITY } from '../../../../shared/agent-session-permission-modes-capability'
+import {
+  AGENT_SESSION_PERMISSION_OWN_RUNTIME_CAPABILITY,
+  AGENT_SESSION_PERMISSION_MODES_RUNTIME_CAPABILITY
+} from '../../../../shared/agent-session-permission-modes-capability'
 import { enqueueSessionOptionSettingsWrite } from './native-chat-session-option-settings-write'
-import { AGENT_SESSION_PERMISSION_MODES_RUNTIME_CAPABILITY } from '../../../../shared/agent-session-permission-modes-capability'
 // @vitest-environment happy-dom
 
 import { act, renderHook, waitFor } from '@testing-library/react'

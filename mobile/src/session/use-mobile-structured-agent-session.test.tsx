@@ -1,5 +1,10 @@
 import { createElement } from 'react'
-import { snapshotEvent as publishedSnapshot } from './use-mobile-structured-agent-session-queued.test-fixture'
+import {
+  snapshotEvent as publishedSnapshot,
+  fieldsOf,
+  mutationOk,
+  ok
+} from './use-mobile-structured-agent-session-queued.test-fixture'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
@@ -8,7 +13,6 @@ import type {
 } from '../../../src/shared/agent-session-journal-types'
 import type { SessionOptionDescriptor } from '../../../src/shared/native-chat-session-options'
 import type { RpcClient } from '../transport/rpc-client'
-import { fieldsOf, mutationOk, ok } from './use-mobile-structured-agent-session-queued.test-fixture'
 import { markRpcDeliveryUnknown } from '../transport/rpc-delivery-ambiguity'
 import { formatQuestionFreeTextAnswer } from './mobile-native-chat-question'
 import type { MobileNativeChatSendOutcome } from './mobile-native-chat-send'

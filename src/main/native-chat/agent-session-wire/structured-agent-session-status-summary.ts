@@ -58,10 +58,7 @@ export function structuredAgentSessionStatusSummary({
       : {}),
     ...(session.restartResume ? { restartResume: { phase: session.restartResume.phase } } : {}),
     ...projected,
-    runtimePermission:
-      permissionMode === 'own'
-        ? structuredAgentSessionRuntimePermission(session.child ?? undefined)
-        : null,
+    runtimePermission: structuredAgentSessionRuntimePermission(session.child ?? undefined),
     // Only a working session is still being stopped; any other status already ended that work.
     ...(stopping && projected.status === 'working' ? { stopping: true as const } : {}),
     ...(record?.rewind?.phase === 'prepared' || record?.rewind?.phase === 'provider-succeeded'
