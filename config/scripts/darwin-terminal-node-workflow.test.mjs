@@ -44,7 +44,9 @@ it.each(['adhoc', 'daily', 'hourly', 'release'])(
     const build = steps.findIndex(
       (step) => step.name === 'Build and verify the patched terminal runtimes'
     )
-    expect(build).toBeGreaterThan(steps.findIndex((step) => step.name === 'Install dependencies'))
+    const install = steps.findIndex((step) => step.name === 'Install dependencies')
+    expect(install).toBeGreaterThanOrEqual(0)
+    expect(build).toBeGreaterThan(install)
     expect(steps[build].run).toContain('pnpm run build:packages')
     expect(steps[build].run).toContain('verify-darwin-terminal-node.mjs --arch=arm64')
     expect(steps[build].run).toContain('verify-darwin-terminal-node.mjs --arch=x64')
