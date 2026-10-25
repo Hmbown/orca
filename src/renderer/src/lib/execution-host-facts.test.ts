@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import type { RuntimeEnvironmentStatus } from '../../../shared/runtime-host-status'
 import { resolveRepoWorktreeLaunchPlatform } from './execution-host-facts'
+import { getDefaultSettings } from '../../../shared/constants'
 
 vi.mock('./new-workspace', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -40,8 +41,7 @@ function state(): State {
     endpointProjectHostSetups: [],
     activeRepoId: null,
     activeWorktreeId: null,
-    // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the resolver reads no other setting.
-    settings: {} as State['settings'],
+    settings: getDefaultSettings('/tmp'),
     sshConnectionStates: new Map(),
     sshStateByEnvironment: new Map(),
     runtimeStatusByEnvironmentId: linuxServer()

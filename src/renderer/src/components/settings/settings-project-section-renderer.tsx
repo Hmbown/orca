@@ -10,7 +10,7 @@ export function renderProjectSettingsSections(context: SettingsRenderContext): R
   const { model, navigation, terminal, view } = context
   return model.settingsProjectList.map((settingsProject) => {
     const repoSectionId = `repo-${settingsProject.representativeRepoId}`
-    // Why: use the switcher-selected host's repo so identity/host-specific edits follow "Available Hosts".
+    // Identity edits must follow the selected Available Hosts entry.
     const hostSelection = getSettingsEntryHostSelection(
       settingsProject,
       model.settingsProjectHostSelection,
@@ -42,7 +42,7 @@ export function renderProjectSettingsSections(context: SettingsRenderContext): R
         searchEntries={navigation.getSectionSearchEntries(repoSectionId)}
       >
         {view.isSectionMounted(repoSectionId) ? (
-          // Why: re-key per host so same-id hosts don't reuse the prior host's drafts/effects.
+          // Re-key by host so same-ID hosts cannot inherit drafts/effects.
           <RepositoryPane
             key={repoHostIdentity}
             repo={repo}

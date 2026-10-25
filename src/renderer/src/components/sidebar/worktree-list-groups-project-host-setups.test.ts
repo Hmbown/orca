@@ -53,9 +53,7 @@ describe('buildRows with pinned worktrees', () => {
   })
 
   it('keeps the cross-host project header label when another project section renders', () => {
-    // Why: the project header must read the project's own display name, not the
-    // anchor checkout's repo name, however many sections are visible — toggling
-    // "Hide sleeping workspaces" must not rename a project (#16127).
+    // Filtering other sections must not replace a project’s display name with its anchor checkout’s name.
     const otherRepo: Repo = {
       ...repo,
       id: 'repo-other',
@@ -657,9 +655,7 @@ describe('buildRows with pinned worktrees', () => {
       path: '/tmp/orca-runtime-b-feature',
       displayName: 'feature-runtime-b'
     }
-    // Why: a `provisioned` (recipe-created ephemeral) copy shares the project's
-    // remote identity but must not split the user's real checkout into two
-    // headers; it nests under the project. See #6320 / #5374.
+    // Provisioned copies share project identity and nest rather than split real checkouts into extra headers.
     const runtimeSetupB: ProjectHostSetup = {
       ...projectHostSetups[0]!,
       id: runtimeRepoB.id,

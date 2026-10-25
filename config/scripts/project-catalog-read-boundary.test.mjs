@@ -7,6 +7,7 @@ import { resolveOxcCliInvocation } from './oxc-cli-invocation.mjs'
 
 it('enforces five raw catalog forms with the actual config and narrow file exceptions', () => {
   const config = JSON.parse(readFileSync(resolve('.oxlintrc.json'), 'utf8'))
+  const jsPluginConfig = JSON.parse(readFileSync(resolve('config/oxlint-js-plugins.json'), 'utf8'))
   expect(config.ignorePatterns.every((pattern) => typeof pattern === 'string')).toBe(true)
   const folder = realpathSync(mkdtempSync(join(tmpdir(), 'sta-10541-catalog-rule-')))
   const source = `
@@ -26,13 +27,14 @@ it('enforces five raw catalog forms with the actual config and narrow file excep
     }
   `
   try {
+    writeFileSync(join(folder, 'config.json'), JSON.stringify(config))
     writeFileSync(
-      join(folder, 'config.json'),
+      join(folder, 'js-config.json'),
       JSON.stringify({
-        ...config,
-        jsPlugins: config.jsPlugins.map((plugin) => ({
+        ...jsPluginConfig,
+        jsPlugins: jsPluginConfig.jsPlugins.map((plugin) => ({
           ...plugin,
-          specifier: resolve(plugin.specifier)
+          specifier: resolve('config', plugin.specifier)
         }))
       })
     )
@@ -40,28 +42,30 @@ it('enforces five raw catalog forms with the actual config and narrow file excep
       const target = join(folder, file)
       mkdirSync(dirname(target), { recursive: true })
       writeFileSync(target, content)
-      const invocation = resolveOxcCliInvocation('oxlint', 'oxlint')
-      const result = spawnSync(
-        invocation.command,
-        [
-          ...invocation.prefixArgs,
-          '--config',
-          join(folder, 'config.json'),
-          '--format',
-          'json',
-          file
-        ],
-        { cwd: folder, encoding: 'utf8' }
-      )
-      expect(result.error).toBeUndefined()
-      const diagnostics = JSON.parse(result.stdout).diagnostics
-      expect(result.stderr).toBe('')
-      expect(JSON.parse(result.stdout).number_of_files, result.stdout).toBe(1)
-      return diagnostics.filter(
-        (entry) =>
-          entry.code.includes('no-restricted-properties') ||
-          entry.code.includes('no-raw-project-catalog-computed')
-      )
+      return ['config.json', 'js-config.json'].flatMap((configFile) => {
+        const invocation = resolveOxcCliInvocation('oxlint', 'oxlint')
+        const result = spawnSync(
+          invocation.command,
+          [
+            ...invocation.prefixArgs,
+            '--config',
+            join(folder, configFile),
+            '--format',
+            'json',
+            file
+          ],
+          { cwd: folder, encoding: 'utf8' }
+        )
+        expect(result.error).toBeUndefined()
+        const diagnostics = JSON.parse(result.stdout).diagnostics
+        expect(result.stderr).toBe('')
+        expect(JSON.parse(result.stdout).number_of_files, result.stdout).toBe(1)
+        return diagnostics.filter(
+          (entry) =>
+            entry.code.includes('no-restricted-properties') ||
+            entry.code.includes('no-raw-project-catalog-computed')
+        )
+      })
     }
     for (const file of [
       'src/renderer/src/hooks/useActiveProjectSkillRuntime.ts',

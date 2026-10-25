@@ -11,12 +11,8 @@ import type { Repo } from './repo-types'
 import { getRepoSetupOwnerScope } from './repo-host-identity'
 import { getOutclaimedProjectSetups } from './project-checkout-claim'
 
-/**
- * A projection-local draft. `project` is always freshly built by `createProjectFromRepo`, never a
- * caller's or persisted row, because `mergeProjectRepo` writes to it in place; seeding it from an
- * existing `Project` would leak those writes to whoever else holds that row. `sourceRepoIds`
- * mirrors `project.sourceRepoIds` so membership is a lookup rather than a rescan.
- */
+/** Own fresh mutable project drafts: using persisted/caller rows leaks mergeProjectRepo writes. Mirror sourceRepoIds in a set
+ * to avoid membership rescans. */
 type ProjectAccumulator = {
   project: Project
   sourceRepoIds: Set<string>
@@ -44,8 +40,7 @@ export function getProjectProviderIdentity(
     const parts = (repo.repoIcon.label?.trim() ?? '').split('/')
     const iconOwner = parts[0]?.trim()
     const iconRepo = parts[1]?.trim()
-    // Why: repo auto-detect can know the GitHub slug through the generated
-    // avatar icon even when legacy `upstream` has not been backfilled yet.
+    // Generated GitHub avatars can retain slugs when legacy upstream fields are not backfilled.
     if (iconOwner && iconRepo && parts.length === 2) {
       let host: string | undefined
       try {
@@ -69,8 +64,7 @@ export function getProjectProviderIdentity(
 export function getGitRemoteProviderIdentity(
   repo: Pick<Repo, 'gitRemoteIdentity'>
 ): ProjectProviderIdentity | null {
-  // Why: the remote URL retains HTTP(S) endpoint ports that the canonical
-  // key omits, so prefer it when reconstructing a host-qualified GHES identity.
+  // Prefer remote URLs preserving HTTP(S) API ports over canonical keys that omit them (GHES).
   return (
     parseGitHubRemoteUrl(repo.gitRemoteIdentity?.remoteUrl) ??
     parseGitHubCanonicalKey(repo.gitRemoteIdentity?.canonicalKey)
@@ -95,10 +89,8 @@ export function hasProjectRemoteIdentity(
   )
 }
 
-/** True while nothing has settled the repo's remote identity yet: the background
- *  probe has not answered (or could not reach the host), as distinct from the
- *  resolved `null` marker meaning "checked, no usable remote". Provider-neutral —
- *  GitHub repos usually settle through persisted `upstream` instead. */
+/** Undefined remote identity is pending/unreachable, distinct from resolved null (checked, unusable).
+ * Provider-neutral; GitHub repos usually resolve via persisted upstream. */
 export function isProjectRemoteIdentityPending(
   repo: Pick<Repo, 'upstream' | 'repoIcon' | 'gitRemoteIdentity'>
 ): boolean {
@@ -123,11 +115,7 @@ export function getProjectIdentityKey(
   return `${HOST_LOCAL_PROJECT_ID_PREFIX}${repo.id}`
 }
 
-/**
- * True for the `repo:<id>` fallback above — a folder project, or a git repo with no
- * remote. The id is a per-host repo id, so the same project on another host derives a
- * different one and can never be matched there.
- */
+/** repo:<id> fallback is host-local (folders/remote-less repos); identical projects elsewhere derive different IDs. */
 export function isHostLocalProjectId(projectId: string): boolean {
   return projectId.startsWith(HOST_LOCAL_PROJECT_ID_PREFIX)
 }
@@ -217,15 +205,12 @@ function parseGitHubRemoteUrl(remoteUrl: string | undefined): ProjectProviderIde
   }
 }
 
-// Why: `addedAt || now` restamps Date.now() when addedAt is 0 / absent / NaN, so every
-// projection looks dirty and reconcileCatalogRows never reuses the project or setup.
+// Do not restamp missing/zero/NaN addedAt with now: every projection would look dirty and defeat row reuse.
 function catalogTimestampFromAddedAt(addedAt: number): number {
   return Number.isFinite(addedAt) ? addedAt : 0
 }
 
-// Why: 0 / absent / NaN means "the repo predates timestamped catalog rows", not epoch. Keeping
-// it out of min()/max() stops one unknown sibling from wiping a real timestamp — and unlike the
-// old `|| now` fallback it stays order-independent, so both merge orders agree.
+// Exclude unknown timestamps from min/max so they cannot erase known siblings; retain order-independent results without now fallbacks.
 function knownCatalogTimestamp(value: number): number | undefined {
   return Number.isFinite(value) && value !== 0 ? value : undefined
 }

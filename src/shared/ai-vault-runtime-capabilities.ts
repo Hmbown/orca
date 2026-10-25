@@ -1,9 +1,6 @@
 import { AI_VAULT_CHAT_FORK_SOURCE_CAPABILITY } from './ai-vault-resume-preparation'
 
-// Why: signals the host exposes the Agent Session History scanner over RPC
-// (aiVault.listSessions). Registered unconditionally for every build, so it is a
-// STATIC capability advertised by getStatus() automatically — NOT a runtime
-// conditional like browser.headless.v1.
+// aiVault.listSessions is unconditional, so getStatus advertises this statically rather than as a runtime-dependent capability.
 export const AI_VAULT_RUNTIME_CAPABILITY = 'aiVault.v1' as const
 // Canonical Project intent is resolved before native candidate limits; absent intent stays legacy.
 export const AI_VAULT_CANONICAL_PROJECT_SEARCH_CAPABILITY =

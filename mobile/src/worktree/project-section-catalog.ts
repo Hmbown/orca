@@ -6,16 +6,12 @@ import { NO_PROJECT_SECTION_CATALOG, type ProjectSectionCatalog } from './worksp
 import type { SectionRepo } from './workspace-list-types'
 import { resolveServedProjectSectionClaims } from '../../../src/shared/project-section-catalog-claims'
 
-/**
- * Project grouping's inputs: the desktop sidebar's own catalog when it serves one, else (an older
- * desktop) its own repos with no projects, so rows group by repo. Only shown hosts' repos open
- * empty sections; the grouping itself spans every host, as the desktop's does.
- */
+// Use served all-host project grouping; older desktops fall back to repo grouping.
+// Only visible hosts’ repos open empty sections.
 export function buildProjectSectionCatalog(
   served: ServedProjectSections | null,
   desktopRepos: readonly SectionRepo[],
   visibleHostIds: readonly ExecutionHostId[] | null,
-  /** The shared UI value; null until read, when the served one stands in. */
   projectOrderBy: ProjectOrderBy | null
 ): ProjectSectionCatalog {
   const shown = (repos: readonly SectionRepo[]) =>
