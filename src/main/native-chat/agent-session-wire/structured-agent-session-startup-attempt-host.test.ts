@@ -32,7 +32,8 @@ import {
   HOST_TEST_SESSION as SESSION,
   HOST_TEST_THREAD as THREAD,
   hostTestAttachParams,
-  hostTestMessage,
+  hostTestCancelParams,
+  hostTestSendParams as sendParams,
   hostTestOperationId,
   resetHostTestOperationIds
 } from './structured-agent-session-host-test-data'
@@ -169,23 +170,6 @@ afterEach(async () => {
   }
 })
 
-function sendParams(text: string, clientOperationId = hostTestOperationId()) {
-  const body = hostTestMessage(text)
-  return {
-    envelope: {
-      sessionId: SESSION,
-      clientOperationId,
-      expectedRuntimeFence: 1,
-      payloadFingerprint: computeAgentSessionPayloadFingerprint({
-        method: 'agentSession.send',
-        sessionId: SESSION,
-        fields: { body }
-      })
-    },
-    body
-  }
-}
-
 async function accept(text: string, clientOperationId?: string): Promise<string> {
   const params = sendParams(text, clientOperationId)
   expect(await host.send(CALLER, params)).toMatchObject({
@@ -212,19 +196,7 @@ async function heldBehindStart(text: string, interval = 0): Promise<string> {
 }
 
 function stop() {
-  return host.cancel(CALLER, {
-    envelope: {
-      sessionId: SESSION,
-      clientOperationId: hostTestOperationId(),
-      expectedRuntimeFence: null,
-      payloadFingerprint: computeAgentSessionPayloadFingerprint({
-        method: 'agentSession.cancel',
-        sessionId: SESSION,
-        fields: { turnId: 'turn-none' }
-      })
-    },
-    turnId: 'turn-none'
-  })
+  return host.cancel(CALLER, hostTestCancelParams())
 }
 
 const HOST_STOPPED = agentSessionFailureWords(agentSessionFailureFact('hostStopped'), {

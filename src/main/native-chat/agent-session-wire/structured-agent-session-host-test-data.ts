@@ -79,3 +79,36 @@ export function hostTestDrawnRowIds(
     projectStructuredAgentSessionMessages(snapshot.items, optimistic, snapshot.submissions)
   ).map(({ id }) => id)
 }
+
+export function hostTestSendParams(text: string, clientOperationId = hostTestOperationId()) {
+  const body = hostTestMessage(text)
+  return {
+    envelope: {
+      sessionId: HOST_TEST_SESSION,
+      clientOperationId,
+      expectedRuntimeFence: 1,
+      payloadFingerprint: computeAgentSessionPayloadFingerprint({
+        method: 'agentSession.send',
+        sessionId: HOST_TEST_SESSION,
+        fields: { body }
+      })
+    },
+    body
+  }
+}
+
+export function hostTestCancelParams() {
+  return {
+    envelope: {
+      sessionId: HOST_TEST_SESSION,
+      clientOperationId: hostTestOperationId(),
+      expectedRuntimeFence: null,
+      payloadFingerprint: computeAgentSessionPayloadFingerprint({
+        method: 'agentSession.cancel',
+        sessionId: HOST_TEST_SESSION,
+        fields: { turnId: 'turn-none' }
+      })
+    },
+    turnId: 'turn-none'
+  }
+}
