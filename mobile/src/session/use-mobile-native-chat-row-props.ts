@@ -10,11 +10,15 @@ import type {
 import type { NativeChatTaskListPredecessors } from '../../../src/shared/native-chat-task-list-history'
 import type { NativeChatResolvedPrompt } from '../../../src/shared/native-chat-resolution-receipt'
 import { isActionableStructuredAgentSessionPrompt } from '../../../src/shared/structured-agent-session-live-turn'
+import type { MobileNativeChatRowItemSource } from './MobileNativeChatRowItemSource'
+import type { ContextType } from 'react'
+import type { MobileNativeChatItemSourceContext } from './mobile-native-chat-item-read'
 import type { MobileNativeChatTurnRow } from './use-mobile-native-chat-turn-disclosure'
 
 /** The message and its derived render inputs share one reuse boundary. */
 export type MobileNativeChatRowProps = MobileNativeChatTurnRow & {
   message: NativeChatMessage
+  itemSource: MobileNativeChatRowItemSource | null
   rowKey: string
   previousTodoWrite: NativeChatToolCallBlock | undefined
   previousUpdatePlan: NativeChatToolCallBlock | undefined
@@ -26,6 +30,7 @@ export type MobileNativeChatRowProps = MobileNativeChatTurnRow & {
 
 /** The per-chat lookups a row's props are read from. */
 export type MobileNativeChatRowLookups = {
+  itemSource?: ContextType<typeof MobileNativeChatItemSourceContext>
   resolveTurnRow: (index: number, message: NativeChatMessage) => MobileNativeChatTurnRow
   /** The row's place on the page, kept while older messages join it. */
   rowKeyOf: (message: NativeChatMessage) => string
@@ -44,8 +49,25 @@ export function resolveMobileNativeChatRowProps(
   lookups: MobileNativeChatRowLookups
 ): MobileNativeChatRowProps {
   const predecessors = lookups.taskListPredecessors.get(message.id)
+  const turn = lookups.resolveTurnRow(index, message)
+  const source = lookups.itemSource
+  const detail = source?.messageDetail
   return {
     message,
+    itemSource: source
+      ? {
+          client: source.client,
+          sessionId: source.sessionId,
+          details: (turn.workRun ?? [message]).map((member) => {
+            const raw = detail?.raw(member.id)
+            return {
+              id: member.id,
+              raw: raw?.shortened ? raw : undefined,
+              state: detail?.state(member.id) ?? null
+            }
+          })
+        }
+      : null,
     rowKey: lookups.rowKeyOf(message),
     // The calls, not the record: a rebuilt record would defeat the row's memo.
     previousTodoWrite: predecessors?.todowrite,
@@ -53,7 +75,7 @@ export function resolveMobileNativeChatRowProps(
     unsentNotice: message.unsent ? lookups.unsentNotices.get(message.id) : undefined,
     receipt: lookups.receipts?.get(message.id),
     awaiting: isActionableStructuredAgentSessionPrompt(message.id, lookups.actionablePromptIds),
-    ...lookups.resolveTurnRow(index, message),
+    ...turn,
     runOwner: lookups.runOwners.get(message.id)
   }
 }

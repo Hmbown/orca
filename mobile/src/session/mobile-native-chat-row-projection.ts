@@ -30,7 +30,14 @@ function unchanged(previous: unknown, next: unknown, depth: number): boolean {
   const keys = Object.keys(previous)
   return (
     keys.length === Object.keys(next).length &&
-    keys.every((key) => Object.hasOwn(next, key) && unchanged(previous[key], next[key], depth - 1))
+    keys.every(
+      (key) =>
+        Object.hasOwn(next, key) &&
+        // Full-message requests are fenced by the original shortened row's identity.
+        (key === 'raw'
+          ? previous[key] === next[key]
+          : unchanged(previous[key], next[key], depth - 1))
+    )
   )
 }
 

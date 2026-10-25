@@ -10,6 +10,9 @@ import { foldMobileNativeChatMessages } from './mobile-native-chat-render-data'
 import { useMobileStructuredAgentTurnTiming } from './use-mobile-structured-agent-turn-timing'
 import { MobileNativeChatPageList } from './MobileNativeChatPageList'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
+import { MobileNativeChatOverlay } from './MobileNativeChatOverlay'
+import type { MobileNativeChatController } from './use-mobile-native-chat-controller'
+import { stubRpcClient } from '../transport/rpc-client-test-stub'
 import { MobileNativeChatView } from './MobileNativeChatView'
 
 vi.mock('react-native', async () => {
@@ -44,10 +47,27 @@ vi.mock('lucide-react-native', () => ({
 const rendered = vi.hoisted(() => new Map<string, number>())
 vi.mock('./MobileNativeChatMessage', async () => {
   const React = await import('react')
+  const { useMobileNativeChatFullMessage } = await import('./MobileNativeChatFullContent')
+  const { MobileNativeChatVisualContext } = await import('./mobile-native-chat-visual-context')
+  const { MobileNativeChatReplyRevealsContext } = await import('./mobile-native-chat-reply-reveals')
+  const { MobileNativeChatDisclosureContext } =
+    await import('./mobile-native-chat-disclosure-store')
+  const { MobileNativeChatRowOverlaysContext } = await import('./mobile-native-chat-row-overlays')
+  const { MobileNativeChatGrowthHoldContext } = await import('./mobile-native-chat-growth-hold')
   return {
     MobileNativeChatMessage: React.memo((props: { message: NativeChatMessage }) => {
+      const full = useMobileNativeChatFullMessage(props.message)
+      React.useContext(MobileNativeChatVisualContext)
+      React.useContext(MobileNativeChatReplyRevealsContext)
+      React.useContext(MobileNativeChatDisclosureContext)
+      React.useContext(MobileNativeChatRowOverlaysContext)
+      React.useContext(MobileNativeChatGrowthHoldContext)
       rendered.set(props.message.id, (rendered.get(props.message.id) ?? 0) + 1)
-      return React.createElement('ChatMessage', props)
+      return React.createElement(
+        'ChatMessage',
+        { ...props, recovery: full.recovery },
+        full.showFull
+      )
     })
   }
 })
@@ -60,6 +80,15 @@ vi.mock('../components/ActionSheetModal', () => ({ ActionSheetModal: 'ActionShee
 vi.mock('./MobileNativeChatAsk', () => ({ MobileNativeChatAsk: 'ChatAsk' }))
 vi.mock('./MobileNativeChatPermission', () => ({ MobileNativeChatPermission: 'ChatPermission' }))
 vi.mock('./MobileNativeChatQuestion', () => ({ MobileNativeChatQuestion: 'ChatQuestion' }))
+vi.mock('../platform/use-reduced-motion', () => ({ useReducedMotionEnabled: () => true }))
+vi.mock('./MobileNativeChatQueuedMessages', () => ({ MobileNativeChatQueuedMessages: 'Queued' }))
+vi.mock('./MobileNativeChatBackgroundTasks', () => ({
+  MobileNativeChatBackgroundTasks: 'BackgroundTasks'
+}))
+vi.mock('./MobileNativeChatImageViewer', () => ({ MobileNativeChatImageViewer: 'ImageViewer' }))
+vi.mock('./MobileNativeChatMessageActionsSheet', () => ({
+  MobileNativeChatMessageActionsSheet: 'ActionsSheet'
+}))
 vi.mock('./MobileNativeChatComposer', () => ({ MobileNativeChatComposer: 'Composer' }))
 
 type ViewProps = Parameters<typeof MobileNativeChatView>[0]
@@ -92,6 +121,8 @@ const stable: Pick<
   imagePreviewsByMessageId: { 'user-0': ['local:preview'] }
 }
 
+const itemSource = { client: stubRpcClient(), sessionId: 'session' }
+const openFile = () => {}
 function Harness({
   items,
   corpus = []
@@ -103,21 +134,51 @@ function Harness({
     () => [...corpus, ...projectStructuredAgentSessionMessages(items, [], [])],
     [items, corpus]
   )
-  const folded = useMemo(() => foldMobileNativeChatMessages(messages, 'claude'), [messages])
   const timing = useMobileStructuredAgentTurnTiming(
     { items, submissions: [], working: true },
     'live'
   )
-  return createElement(MobileNativeChatView, {
-    ...stable,
-    ...timing,
-    messages,
-    folded,
-    status: 'ready',
-    agent: 'claude',
-    streaming: null,
-    structuredActivityUi: true,
-    agentWorking: true
+  // oxlint-disable-next-line typescript/consistent-type-assertions -- SAFETY: the overlay only reads these controller members; no other controller flow is mounted.
+  const controller = {
+    showNativeChat: true,
+    nativeChatSession: { messages, status: 'ready' },
+    nativeChatAgent: 'claude',
+    nativeChatStructured: true,
+    nativeChatAgentWorking: true,
+    nativeChatItemSource: itemSource,
+    nativeChatVisualSource: itemSource,
+    nativeChatSettledTurns: timing.settledTurns,
+    nativeChatTurnJournal: timing.turnJournal,
+    nativeChatWorkingStartedAt: timing.workingStartedAt,
+    chatPending: stable.pending,
+    chatImagePreviewsByMessageId: stable.imagePreviewsByMessageId,
+    chatComposerText: '',
+    setChatComposerText: stable.onComposerTextChange,
+    getChatComposerEditGeneration: stable.getComposerEditGeneration,
+    nativeChatQueued: { cards: [], pause: null, sessionKey: 'session' }
+  } as unknown as MobileNativeChatController
+  return createElement(MobileNativeChatOverlay, {
+    controller,
+    onOpenFile: openFile,
+    images: {
+      attachments: [],
+      isAttaching: false,
+      attachImage: async () => {},
+      removeAttachment: () => {},
+      sendNativeChat: stable.onSend
+    },
+    onMicPress: undefined,
+    micActive: false,
+    dictationMode: undefined,
+    onMicPressIn: () => {},
+    onMicPressOut: () => {},
+    inputLockReason: null,
+    sendErrorMessage: null,
+    onClearSendError: () => {},
+    sendSurfaceId: stable.sendSurfaceId,
+    sessionId: 'session',
+    getSendCompletionGeneration: stable.getSendCompletionGeneration,
+    keyboardInset: 0
   })
 }
 
@@ -235,7 +296,7 @@ function measure(turns: number, corpus: NativeChatMessage[] = []) {
             body: {
               kind: 'message' as const,
               role: 'assistant' as const,
-              blocks: [{ type: 'text' as const, text: 'hello' + '.'.repeat(batch + 1) }]
+              blocks: [{ type: 'text' as const, text: `hello${'.'.repeat(batch + 1)}` }]
             }
           }
         : item
@@ -262,7 +323,7 @@ function measure(turns: number, corpus: NativeChatMessage[] = []) {
     renderer!.root
       .findAll((node) => Object.is(node.type, 'ChatMessage'))
       .find((node) => node.props.message.id === 'live-answer')!.props.message.blocks[0].text
-  ).toBe('hello' + '.'.repeat(20))
+  ).toBe(`hello${'.'.repeat(20)}`)
 }
 
 it.each([10, 100])('bounds streaming renders at %i settled turns', (turns) => measure(turns))
