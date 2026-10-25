@@ -159,7 +159,8 @@ describe('the permission mode on the phone', () => {
     vi.mocked(mutate).mockReset()
     vi.mocked(mutate).mockResolvedValue({
       status: 'accepted',
-      value: { options: { permissionMode: 'full-access' } }
+      value: { options: { permissionMode: 'full-access' } },
+      sameFence: true
     })
     const client: RpcClient = {
       ...optionsClient().client,
