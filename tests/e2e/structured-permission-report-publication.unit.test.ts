@@ -226,7 +226,7 @@ it.each([1, 10, 100])(
       await act(async () => {
         subscriptions.forEach((dispose) => dispose())
       })
-      expect(descriptions()).toEqual(Array(count * 2).fill('Claude settings'))
+      expect(descriptions()).toEqual(Array(count * 2).fill('Permissions'))
     } finally {
       cleanup()
       resetStructuredAgentSessionStatusFeedsForTests()

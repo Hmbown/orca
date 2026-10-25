@@ -15,11 +15,15 @@ function connectionFor(
 }
 
 describe('openCodexThread', () => {
-  it('leaves own settings to config on start and saved policy on resume, then reads the report', async () => {
+  it.each([
+    ['workspaceWrite', 'auto'],
+    ['readOnly', 'read-only'],
+    ['read-only', 'read-only']
+  ])('leaves own policy omitted on start/resume and reports %s', async (sandboxType, expected) => {
     const request = vi.fn(async () => ({
       thread: { id: 'own-thread' },
       approvalPolicy: 'on-request',
-      sandbox: { type: 'workspaceWrite' },
+      sandbox: { type: sandboxType },
       approvalsReviewer: 'auto_review'
     }))
     for (const resumeThreadId of [null, 'own-thread']) {
@@ -28,7 +32,7 @@ describe('openCodexThread', () => {
         { cwd: '/workspace', resumeThreadId },
         2_000
       )
-      expect(opened.reportedPermissionMode).toBe('auto')
+      expect(opened.reportedPermissionMode).toBe(expected)
     }
     expect(request).toHaveBeenNthCalledWith(
       1,

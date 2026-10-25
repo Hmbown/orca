@@ -31,11 +31,7 @@ function selectedChoiceLabel(descriptor: SessionOptionDescriptor): string | null
   ) {
     return null
   }
-  if (
-    descriptor.id === 'permissionMode' &&
-    descriptor.kind.currentValue === 'own' &&
-    descriptor.description
-  ) {
+  if (descriptor.id === 'permissionMode' && descriptor.description) {
     return descriptor.description
   }
   const current = descriptor.kind.currentValue
@@ -58,7 +54,7 @@ export function mobileSessionOptionSummaryValue(descriptor: SessionOptionDescrip
     return descriptor.kind.currentValue ? 'On' : 'Off'
   }
   if (descriptor.valueSource === 'unknown') {
-    return 'Not set'
+    return descriptor.id === 'permissionMode' ? 'Permissions' : 'Not set'
   }
   return selectedChoiceLabel(descriptor) ?? 'Not set'
 }

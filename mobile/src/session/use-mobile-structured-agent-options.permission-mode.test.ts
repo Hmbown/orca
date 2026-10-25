@@ -51,6 +51,7 @@ type ProbeProps = {
   optionStamp: string
   agent?: string
   hostAdvertisesPermissionModes?: boolean | null
+  permissionOwn?: boolean
 }
 
 const mutate: StructuredAgentSessionMutate = vi.fn()
@@ -69,7 +70,11 @@ async function mountOptions(props: ProbeProps) {
       hostSupport:
         probe.hostAdvertisesPermissionModes === null
           ? null
-          : { permissionModes: probe.hostAdvertisesPermissionModes ?? true, statusFeed: false }
+          : {
+              permissionModes: probe.hostAdvertisesPermissionModes ?? true,
+              permissionOwn: probe.permissionOwn,
+              statusFeed: false
+            }
     })
     return null
   }
@@ -151,6 +156,41 @@ describe('the permission pill against a host predating per-chat modes', () => {
 })
 
 describe('the permission mode on the phone', () => {
+  it('writes only a concrete per-chat choice even when it matches the report for Own', async () => {
+    vi.mocked(mutate).mockReset()
+    vi.mocked(mutate).mockResolvedValue({
+      status: 'accepted',
+      value: { options: { permissionMode: 'full-access' } }
+    })
+    const client: RpcClient = {
+      ...optionsClient().client,
+      sendRequest: async () => ({
+        id: 'rpc-1',
+        ok: true,
+        result: {
+          ...optionsFor('own'),
+          current: {
+            model: 'gpt-live',
+            permissionMode: 'own',
+            reportedPermissionMode: 'full-access'
+          }
+        },
+        _meta: { runtimeId: 'runtime-1' }
+      })
+    }
+    const options = await mountOptions({ client, fence: 1, optionStamp: '', permissionOwn: true })
+    expect(options.permission()).toBe('full-access')
+    expect(options.offered()).not.toContain('own')
+    await options.pick('full-access')
+    expect(mutate).toHaveBeenCalledExactlyOnceWith(
+      'agentSession.setOption',
+      'agentSession.setOption',
+      { key: 'permissionMode', value: 'full-access' }
+    )
+    await options.unmount()
+    vi.mocked(mutate).mockReset()
+  })
+
   it('re-reads once when the host status moves, so a desktop pick shows here', async () => {
     const rpc = optionsClient('ask', 'full-access')
     const options = await mountOptions({

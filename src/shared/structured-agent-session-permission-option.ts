@@ -1,5 +1,3 @@
-import { isTuiAgent } from './tui-agent-config'
-import { TUI_AGENT_DISPLAY_NAMES } from './tui-agent-display-names'
 // The chat's permission mode as a picker descriptor: shows the mode the host states, never derives it.
 
 import {
@@ -78,50 +76,49 @@ export function structuredAgentSessionPermissionDescriptor(state: {
 }): SessionOptionDescriptor | null {
   const support = agentChatPermissionModes(state.record.agent)
   const own = state.permissionMode === 'own'
-  const current = own ? 'own' : support?.modes.find((mode) => mode === state.permissionMode)
-  if (!support || !current) {
+  if (!support || (!own && !support.modes.some((mode) => mode === state.permissionMode))) {
     return null
   }
+  const current =
+    state.reportedPermissionMode === undefined && !own && state.permissionOwnSupported !== true
+      ? (state.permissionMode ?? undefined)
+      : (state.reportedPermissionMode ?? undefined)
   const offered = offeredChatPermissionModes(
     support,
-    current === 'auto' ||
+    state.permissionMode === 'auto' ||
+      current === 'auto' ||
       (state.pendingId !== 'model' && currentModelSupportsAutoMode(state.catalog, state.record))
   )
-  const agent = isTuiAgent(state.record.agent)
-    ? TUI_AGENT_DISPLAY_NAMES[state.record.agent]
-    : state.record.agent
-  const reported = support.modes.find((mode) => mode === state.reportedPermissionMode)
-  const now = reported ? MODE_COPY[reported].label : `${agent} settings`
+  const reported = support.modes.find((mode) => mode === current)
+  const label = reported
+    ? MODE_COPY[reported].label
+    : current === 'plan'
+      ? 'Plan mode'
+      : current === 'read-only'
+        ? 'Read only'
+        : (current ?? 'Permissions')
   return {
-    description: own ? now : undefined,
+    description: label,
     id: AGENT_CHAT_PERMISSION_MODE_OPTION_ID,
     label: 'Permissions',
     category: 'mode',
     kind: {
       type: 'select',
       currentValue: current,
-      choices: [
-        ...(state.permissionOwnSupported || own
-          ? [
-              {
-                value: 'own',
-                label: `${agent}'s own settings`,
-                description:
-                  own && state.reportedPermissionMode !== undefined ? `Now: ${now}` : undefined
-              }
-            ]
-          : []),
-        ...offered.map((value) => ({
-          value,
-          label: MODE_COPY[value].label,
-          description: agentDescriptions(state.record.agent)[value] ?? MODE_COPY[value].description
-        }))
-      ]
+      choices: offered.map((value) => ({
+        value,
+        label: MODE_COPY[value].label,
+        description: agentDescriptions(state.record.agent)[value] ?? MODE_COPY[value].description
+      }))
     },
-    valueSource: 'applied',
+    valueSource:
+      current === undefined
+        ? 'unknown'
+        : state.reportedPermissionMode === undefined
+          ? 'applied'
+          : 'reported',
     transport: 'agent-session',
-    settable:
-      state.permissionOwnSupported !== null && (!own || state.reportedPermissionMode !== undefined)
+    settable: state.permissionOwnSupported !== null && current !== undefined
   }
 }
 

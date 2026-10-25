@@ -87,7 +87,7 @@ export function claudeStructuredPermissionOptions(
   mode: AgentChatPermissionChoice
 ): ClaudePermissionOptions {
   if (mode === 'own') {
-    // The SDK otherwise inserts --permission-mode default instead of reading the CLI's settings.
+    // upstream request: https://github.com/anthropics/claude-agent-sdk-typescript/issues/519
     return { resolvePermissionModeInCli: true }
   }
   return mode === 'full-access'

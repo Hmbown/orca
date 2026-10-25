@@ -25,7 +25,8 @@ describe('Claude host-awaited open', () => {
   // SDK-typed shape; ordering constructed
   it.each([
     ['bypassPermissions', 'full-access'],
-    ['plan', null],
+    ['plan', 'plan'],
+    [null, null],
     [undefined, 'accept-edits']
   ] as const)(
     'preserves the startup status permission report %s over init',
@@ -89,7 +90,8 @@ describe('Claude host-awaited open', () => {
       [{ subtype: 'status', status: null, permissionMode: 'default' }, 'ask', true],
       [{ subtype: 'status', status: 'compacting' }, 'ask', false],
       [{ subtype: 'init', model: 'claude-haiku-4-5' }, 'ask', false],
-      [{ subtype: 'status', status: null, permissionMode: 'plan' }, null, true],
+      [{ subtype: 'status', status: null, permissionMode: 'plan' }, 'plan', true],
+      [{ subtype: 'status', status: null, permissionMode: null }, null, true],
       [
         { subtype: 'status', permissionMode: 'bypassPermissions', session_id: 'foreign' },
         null,

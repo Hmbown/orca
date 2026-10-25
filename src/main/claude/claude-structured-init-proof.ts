@@ -59,6 +59,8 @@ export function readClaudeReportedPermissionMode(
       return 'accept-edits'
     case 'auto':
       return 'auto'
+    case 'plan':
+      return 'plan'
     case 'bypassPermissions':
       return 'full-access'
     case null:

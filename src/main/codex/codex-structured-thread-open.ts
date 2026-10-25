@@ -135,6 +135,9 @@ function reportedCodexPermissionMode(reply: Record<string, unknown>): string | n
   const sandbox = reply.sandbox
   const sandboxType =
     typeof sandbox === 'object' && sandbox !== null && 'type' in sandbox ? sandbox.type : sandbox
+  if (sandboxType === 'readOnly' || sandboxType === 'read-only') {
+    return 'read-only'
+  }
   if (
     (sandboxType === 'dangerFullAccess' || sandboxType === 'danger-full-access') &&
     approval === 'never'

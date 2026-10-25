@@ -13,13 +13,10 @@ import { translate } from '@/i18n/i18n'
 import {
   AGENT_CHAT_PERMISSION_MODE_OPTION_ID,
   isAgentChatPermissionMode,
-  isAgentChatPermissionChoice,
-  type AgentChatPermissionChoice,
   type AgentChatPermissionMode
 } from '../../../../shared/agent-chat-permission-mode'
 import type {
   SessionOptionDescriptor,
-  SessionOptionSelectChoice,
   SessionOptionsSurface
 } from '../../../../shared/native-chat-session-options'
 import {
@@ -48,15 +45,13 @@ function ModeName(props: { mode: AgentChatPermissionMode; truncate?: boolean }):
 }
 
 export type NativeChatPermissionModePickerProps = {
-  current: AgentChatPermissionChoice
+  current: string | undefined
   modes: readonly AgentChatPermissionMode[]
   /** Whose descriptions to show; absent describes every agent's. */
   agent?: string | null
   disabled?: boolean
-  own?: SessionOptionSelectChoice
-  ownLabel?: string
-  ownReportedMode?: AgentChatPermissionMode
-  onSelect: (mode: AgentChatPermissionChoice) => void
+  currentLabel?: string
+  onSelect: (mode: AgentChatPermissionMode) => void
 }
 
 function NativeChatPermissionModePickerInner({
@@ -65,13 +60,12 @@ function NativeChatPermissionModePickerInner({
   agent,
   disabled = false,
   onSelect,
-  own,
-  ownLabel,
-  ownReportedMode
+  currentLabel
 }: NativeChatPermissionModePickerProps): React.JSX.Element {
   const title = nativeChatPermissionPickerTitle()
-  const label =
-    current === 'own' ? (ownLabel ?? own?.label ?? title) : nativeChatPermissionModeLabel(current)
+  const label = isAgentChatPermissionMode(current)
+    ? nativeChatPermissionModeLabel(current)
+    : (currentLabel ?? title)
   // `shrink` overrides the button's shrink-0 so a narrow composer truncates the mode name.
   return (
     <DropdownMenu>
@@ -89,10 +83,8 @@ function NativeChatPermissionModePickerInner({
               )}
               className="max-w-40 min-w-0 shrink"
             >
-              {current !== 'own' ? (
+              {isAgentChatPermissionMode(current) ? (
                 <ModeName mode={current} truncate />
-              ) : ownReportedMode ? (
-                <ModeName mode={ownReportedMode} truncate />
               ) : (
                 <>
                   <Settings2 className="size-3.5 shrink-0" aria-hidden />
@@ -109,16 +101,6 @@ function NativeChatPermissionModePickerInner({
       </Tooltip>
       <DropdownMenuContent align="start" side="top" collisionPadding={8} className="w-72">
         <DropdownMenuRadioGroup aria-label={title} value={current}>
-          {own ? (
-            <DropdownMenuRadioItem value="own" disabled={disabled} onSelect={() => onSelect('own')}>
-              <div className="min-w-0 py-0.5">
-                <div>{own.label}</div>
-                {own.description ? (
-                  <div className="text-xs font-normal text-muted-foreground">{own.description}</div>
-                ) : null}
-              </div>
-            </DropdownMenuRadioItem>
-          ) : null}
           {modes.map((mode) => (
             <DropdownMenuRadioItem
               key={mode}
@@ -156,36 +138,27 @@ export function NativeChatComposerPermissionPicker({
 }): React.JSX.Element | null {
   const descriptor = snapshot.find((entry) => entry.id === AGENT_CHAT_PERMISSION_MODE_OPTION_ID)
   const current = descriptor?.kind.type === 'select' ? descriptor.kind.currentValue : undefined
-  if (
-    !surface ||
-    !descriptor ||
-    descriptor.kind.type !== 'select' ||
-    !isAgentChatPermissionChoice(current)
-  ) {
+  if (!surface || !descriptor || descriptor.kind.type !== 'select') {
     return null
   }
   const modes = descriptor.kind.choices
     .map((choice) => choice.value)
     .filter(isAgentChatPermissionMode)
-  const reported = descriptor.kind.choices.find(
-    (choice) => choice.label === descriptor.description
-  )?.value
+  if (modes.length === 0) {
+    return null
+  }
   return (
     <NativeChatPermissionModePicker
       current={current}
       modes={modes}
-      own={descriptor.kind.choices.find((choice) => choice.value === 'own')}
-      ownLabel={descriptor.description}
-      ownReportedMode={isAgentChatPermissionMode(reported) ? reported : undefined}
+      currentLabel={descriptor.description}
       agent={agent ?? null}
       disabled={!descriptor.settable}
       onSelect={(mode) => {
-        if (mode !== current) {
-          // The pick shows at once, so nothing marks it pending.
-          runSessionOptionSurfaceCall(mode, NO_PENDING_MARK, () =>
-            surface.setOption(AGENT_CHAT_PERMISSION_MODE_OPTION_ID, mode)
-          )
-        }
+        // The report can match a new explicit pick while the chat still follows agent settings.
+        runSessionOptionSurfaceCall(mode, NO_PENDING_MARK, () =>
+          surface.setOption(AGENT_CHAT_PERMISSION_MODE_OPTION_ID, mode)
+        )
       }}
     />
   )

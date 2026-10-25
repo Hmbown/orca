@@ -1,4 +1,6 @@
 import { setLocalRuntimeCapabilitiesForTests } from '@/runtime/local-runtime-capabilities'
+import { AGENT_SESSION_PERMISSION_OWN_RUNTIME_CAPABILITY } from '../../../../shared/agent-session-permission-modes-capability'
+import { enqueueSessionOptionSettingsWrite } from './native-chat-session-option-settings-write'
 import { AGENT_SESSION_PERMISSION_MODES_RUNTIME_CAPABILITY } from '../../../../shared/agent-session-permission-modes-capability'
 // @vitest-environment happy-dom
 
@@ -116,7 +118,7 @@ describe('the permission mode another device picks', () => {
     await waitFor(() => expect(row()).toMatchObject({ description: 'Full access', settable: true }))
     mocks.call.mockImplementation(() => new Promise(() => {}))
     rerender({ fence: 2, stamp: 'model-a|own' })
-    expect(row()).toMatchObject({ description: 'Codex settings', settable: false })
+    expect(row()).toMatchObject({ description: 'Permissions', settable: false })
     unmount()
   })
 
@@ -140,6 +142,34 @@ describe('a permission pick on this device', () => {
     mocks.call.mockReset()
     vi.mocked(mutate).mockReset()
     resetHostModelCatalogSnapshotsForTests()
+  })
+
+  it('writes an explicit per-chat pick matching the report without changing agent settings', async () => {
+    setLocalRuntimeCapabilitiesForTests([
+      AGENT_SESSION_PERMISSION_MODES_RUNTIME_CAPABILITY,
+      AGENT_SESSION_PERMISSION_OWN_RUNTIME_CAPABILITY
+    ])
+    mocks.call.mockResolvedValue({
+      models: [{ id: 'model-a', label: 'Model A', isDefault: true, efforts: [] }],
+      current: { model: 'model-a', permissionMode: 'own', reportedPermissionMode: 'full-access' }
+    })
+    vi.mocked(mutate).mockResolvedValue({ options: { permissionMode: 'full-access' } })
+    vi.mocked(enqueueSessionOptionSettingsWrite).mockClear()
+    const { result, unmount } = renderReopened(1)
+    await waitFor(() => expect(permission(result.current.optionSnapshot)).toBe('full-access'))
+    await act(async () => {
+      expect(await result.current.setStructuredOption('permissionMode', 'full-access')).toBe(true)
+    })
+    expect(mutate).toHaveBeenCalledExactlyOnceWith(
+      'agentSession.setOption',
+      'agentSession.setOption',
+      {
+        key: 'permissionMode',
+        value: 'full-access'
+      }
+    )
+    expect(enqueueSessionOptionSettingsWrite).not.toHaveBeenCalled()
+    unmount()
   })
 
   it('a PR2 client never sends own to a PR1 host', async () => {
