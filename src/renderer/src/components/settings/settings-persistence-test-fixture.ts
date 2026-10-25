@@ -1,5 +1,5 @@
 import { cleanup } from '@testing-library/react'
-import { afterEach, beforeEach, expect, vi } from 'vitest'
+import { afterEach, beforeEach, expect, vi, type Mock } from 'vitest'
 import { getDefaultSettings } from '../../../../shared/constants'
 import type { GlobalSettings } from '../../../../shared/global-settings-types'
 import { useAppStore } from '../../store'
@@ -16,7 +16,7 @@ const originalState = useAppStore.getState()
 const originalApi = window.api
 export const persist = vi.fn<(updates: Partial<GlobalSettings>) => Promise<GlobalSettings>>()
 
-export const runtimeCall = vi.fn()
+export const runtimeCall: Mock = vi.fn()
 
 beforeEach(() => {
   vi.clearAllMocks()
