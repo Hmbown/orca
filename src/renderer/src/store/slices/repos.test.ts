@@ -336,8 +336,8 @@ describe('repo slice runtime routing', () => {
       expect(projectsSetupExistingFolder).not.toHaveBeenCalled()
       expect(runtimeEnvironmentCall).not.toHaveBeenCalled()
       expect(store.getState().repos).toBe(before.repos)
-      expect(store.getState().projects).toBe(before.projects)
-      expect(store.getState().projectHostSetups).toBe(before.projectHostSetups)
+      expect(store.getState().endpointProjects).toBe(before.endpointProjects)
+      expect(store.getState().endpointProjectHostSetups).toBe(before.endpointProjectHostSetups)
       expect(toast.error).toHaveBeenCalledWith('Failed to add project', {
         description: SERVER_SSH_REFUSAL,
         duration: expect.any(Number)

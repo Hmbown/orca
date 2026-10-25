@@ -54,7 +54,6 @@
     {
       "files": [
         "src/renderer/src/store/project-host-setup-selector.ts",
-        "src/renderer/src/store/project-search-catalog.ts",
         "src/renderer/src/store/repos/repo-catalog-identity.ts",
         "src/renderer/src/store/repos/repo-catalog-actions.ts",
         "src/renderer/src/store/repos/runtime-repo-catalog-actions.ts",

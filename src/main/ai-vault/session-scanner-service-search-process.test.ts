@@ -34,7 +34,7 @@ it('serializes canonical ownership into a separate production scanner before nat
   const client = new AiVaultScannerServiceClient({
     processFactory: () => {
       expect(child).toBeUndefined()
-      const startedAt = new Date().toISOString()
+      const startedAtMonotonicNs = process.hrtime.bigint().toString()
       child = spawnProcess({
         program: executable,
         args: ['--max-old-space-size=384', '--conditions=orca-source', '--import', loader, entry],
@@ -62,7 +62,7 @@ it('serializes canonical ownership into a separate production scanner before nat
       console.info('scanner child ownership', {
         pid: child.pid,
         parentPid: process.pid,
-        startedAt,
+        startedAtMonotonicNs,
         executable,
         entry
       })

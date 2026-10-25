@@ -164,6 +164,7 @@ const baseWithin = z.discriminatedUnion('kind', [
 const baseRequest = AiVaultSearchRequestSchema.safeExtend({ within: baseWithin.optional() })
 
 it('pairs old discovery with canonical persistence, compatibility backfill, selected callers and actual legacy/native results', async () => {
+  vi.spyOn(Date, 'now').mockReturnValue(1_700_000_000_000)
   const oldStore = await seededStore('old-source')
   const newStore = await seededStore('new-source')
   const raw = projectHostSetupCompatibilityFromRepos([a, b])
