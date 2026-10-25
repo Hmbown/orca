@@ -113,14 +113,53 @@ export async function dragPaneOutToTabStrip(
   if (!handleBox || !stripBox || !lastTabBox || !firstTabBox) {
     throw new Error('Pane drag handle or tab strip is not laid out')
   }
+  // TEMP diagnostics
+  await page.evaluate(() => {
+    const events: string[] = []
+    document.body.dataset.dragEvents = ''
+    const note = (name: string) => (event: Event) => {
+      events.push(
+        `${name}:${event.target instanceof Element ? event.target.className : 'win'}`.slice(0, 80)
+      )
+      document.body.dataset.dragEvents = events.slice(-30).join('|')
+    }
+    window.addEventListener('blur', note('blur'), true)
+    window.addEventListener('pointerdown', note('down'), true)
+    window.addEventListener('pointerup', note('up'), true)
+    window.addEventListener('pointercancel', note('cancel'), true)
+    window.addEventListener('lostpointercapture', note('lost'), true)
+    window.addEventListener('gotpointercapture', note('got'), true)
+  })
   await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + 4)
   await page.mouse.down()
+  await page.mouse.move(handleBox.x + handleBox.width / 2, handleBox.y + 30, { steps: 5 })
+  console.log(
+    'DRAGMID',
+    JSON.stringify(
+      await page.evaluate(() => ({
+        source: document.querySelectorAll('.is-drag-source').length,
+        overlay: document.querySelector<HTMLElement>('.pane-drop-overlay')?.style.display ?? null,
+        events: document.body.dataset.dragEvents,
+        focus: document.hasFocus()
+      }))
+    )
+  )
   await page.mouse.move(
     position === 'start'
       ? firstTabBox.x + 4
       : Math.min(lastTabBox.x + lastTabBox.width + 24, stripBox.x + stripBox.width - 4),
     stripBox.y + stripBox.height / 2,
     { steps: 20 }
+  )
+  console.log(
+    'DRAGEND',
+    JSON.stringify(
+      await page.evaluate(() => ({
+        source: document.querySelectorAll('.is-drag-source').length,
+        overlay: document.querySelector<HTMLElement>('.pane-drop-overlay')?.style.display ?? null,
+        events: document.body.dataset.dragEvents
+      }))
+    )
   )
   await page.mouse.up()
 }
