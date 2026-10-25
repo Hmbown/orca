@@ -166,7 +166,6 @@ describe('OrchestrationDb reset scopes', () => {
         body: 'Yes'
       })
     ).toThrowError(expect.objectContaining({ code: 'dispatch_inactive' }))
-    // The dispatch its send was keyed to is gone; the pointer operation must not outlive it.
     expect(
       db!.getStructuredPointerOperation(`dispatch:${state.started.dispatch.id}`)
     ).toBeUndefined()
@@ -379,7 +378,7 @@ describe('OrchestrationDb reset scopes', () => {
         afterSequence: 0
       })
     ).toHaveLength(1)
-    // The row is one nudge's idempotency key over messages this scope deletes.
+    // The pointer idempotency row must not survive deletion of its message batch.
     expect(
       db!.getStructuredPointerOperation(`dispatch:${state.started.dispatch.id}`)
     ).toBeUndefined()
