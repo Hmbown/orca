@@ -60,7 +60,7 @@ export class AcpStructuredOptions {
   // Only new sessions resolve configured defaults; loaded sessions retain their saved choices.
   private resolvesConfig = false
   readonly picked = new Set<string>()
-  /** Last successful Orca writes, distinct from agent-reported values. */
+  /** Installed Orca policy and successful writes, distinct from native agent reports. */
   readonly applied = new Map<string, string>()
   private initialChoice: Readonly<Record<string, string>> = {}
   currentProof = new Set<string>()
@@ -207,8 +207,11 @@ export class AcpStructuredOptions {
   reportedPermissionMode(
     values: Readonly<Partial<Record<string, string>>> | undefined
   ): string | null {
+    if (!values) {
+      return this.applied.get('permissionMode') ?? null
+    }
     const current = this.select('mode')?.currentValue
-    return current && values
+    return current
       ? (Object.entries(values).find(([, value]) => value === current)?.[0] ?? null)
       : null
   }

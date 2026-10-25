@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { act, renderHook, waitFor, cleanup } from '@testing-library/react'
-import { expect, it, vi } from 'vitest'
+import { afterEach, expect, it, vi } from 'vitest'
 import type { SDKStatusMessage } from '@anthropic-ai/claude-agent-sdk'
 const transport = vi.hoisted(() => ({ call: vi.fn(), subscribe: vi.fn() }))
 vi.mock('sonner', () => ({ toast: { error: vi.fn() } }))
@@ -32,6 +32,110 @@ import { setLocalRuntimeCapabilitiesForTests } from '@/runtime/local-runtime-cap
 import { AGENT_SESSION_PERMISSION_OWN_RUNTIME_CAPABILITY } from '../../src/shared/agent-session-permission-modes-capability'
 import { resetStructuredAgentSessionStatusFeedsForTests } from '@/runtime/structured-agent-session-status-feed'
 import { resetHostModelCatalogSnapshotsForTests } from '@/runtime/host-model-catalog-snapshots'
+import { acpLaunchSpecFor } from '../../src/main/acp/acp-launch-specs'
+import { openHostRig, launch } from '../../src/main/acp/acp-structured-host.test-support'
+import { GROK_CONFIG_OPTIONS } from '../../src/main/acp/acp-structured-adapter.test-support'
+import { closeProviderTimelineRigs } from '../../src/main/native-chat/agent-session-timeline/provider-timeline-assembler-test-support'
+import type { StructuredAgentSessionHost } from '../../src/main/native-chat/agent-session-wire/structured-agent-session-host'
+
+afterEach(closeProviderTimelineRigs)
+
+function permissionConsumersFor(
+  host: StructuredAgentSessionHost,
+  agent: string,
+  fence: number,
+  count = 1
+) {
+  let id = 0
+  const subscriptions: (() => void)[] = []
+  const subscribe = (emit: Parameters<typeof host.subscribeStatus>[0]['emit']) => {
+    const key = `view-${id++}`
+    const dispose = host.subscribeStatus({ id: key, emit })
+    subscriptions.push(dispose)
+    return dispose
+  }
+  transport.subscribe.mockImplementation(async (_target, emit) => ({
+    unsubscribe: subscribe(emit)
+  }))
+  const read = vi.fn(async (method: string) => {
+    if (method !== 'agentSession.options') {
+      return new Promise<never>(() => {})
+    }
+    return host.readOptions(sessionId)
+  })
+  transport.call.mockImplementation((_target, method) => read(method))
+  const client: RpcClient = {
+    getState: () => 'connected',
+    onStateChange: () => () => {},
+    getReconnectAttempt: () => 0,
+    getLastConnectedAt: () => null,
+    updateTerminalSubscriptionViewport: () => {},
+    notifyForeground: () => {},
+    close: () => {},
+    subscribe: (_method, _params, emit) => subscribe(emit),
+    sendRequest: async (method) => ({ id: 'report-rpc', ok: true, result: await read(method) })
+  }
+  const write = vi.fn()
+  write.mockImplementation(
+    async (_method, _fingerprint, fields: { key: string; value: string }) => {
+      const result = await host.setOption(CALLER, {
+        envelope: envelope('agentSession.setOption', fields),
+        ...fields
+      })
+      if (!result.ok) {
+        throw new Error(`Permission pick refused: ${result.refusal.code}`)
+      }
+      return result.value
+    }
+  )
+  const phoneWrite = vi.fn()
+  phoneWrite.mockImplementation(async (...args) => ({
+    status: 'accepted',
+    value: await write(...args),
+    sameFence: true
+  }))
+  const target = { kind: 'local' } as const
+  const common = { agent, sessionId, fence }
+  const hooks = [
+    () =>
+      useStructuredAgentSessionOptions({
+        ...common,
+        target,
+        transportEnabled: true,
+        isVisible: true,
+        providerVisible: true,
+        providerStarting: false,
+        turnId: null,
+        unloadedTurnRevisions: undefined,
+        hostOptionStamp: 'model|own',
+        mutate: write
+      }),
+    () =>
+      useMobileStructuredAgentOptions({
+        ...common,
+        client,
+        enabled: true,
+        optionStamp: 'model|own',
+        hostSupport: {
+          permissionModes: true,
+          permissionOwn: true,
+          statusFeed: true,
+          coherentModelCatalog: false
+        },
+        mutate: phoneWrite
+      })
+  ]
+  const mount = () =>
+    hooks.flatMap((useOptions) =>
+      Array.from({ length: count }, () =>
+        renderHook(() => {
+          const { optionSnapshot, setStructuredOption } = useOptions()
+          return { optionSnapshot, setStructuredOption }
+        })
+      )
+    )
+  return { mount, read, write, subscriptions }
+}
 
 it.each([1, 10, 100])(
   'publishes idle permission reports to %s desktop and phone consumers without readback/activity',
@@ -106,94 +210,12 @@ it.each([1, 10, 100])(
       await Promise.all(settlements)
       await host.flushStreamedEvents(sessionId)
       expect(adapter['sessions'].get(sessionId)?.translator?.currentTurnId).toBeNull()
-      let id = 0
-      const subscriptions: (() => void)[] = []
-      const subscribe = (emit: Parameters<typeof host.subscribeStatus>[0]['emit']) => {
-        const key = `view-${id++}`
-        const dispose = host.subscribeStatus({ id: key, emit })
-        subscriptions.push(dispose)
-        return dispose
-      }
-      transport.subscribe.mockImplementation(async (_target, emit) => ({
-        unsubscribe: subscribe(emit)
-      }))
-      const read = vi.fn(async (method: string) => {
-        if (method !== 'agentSession.options') {
-          return new Promise<never>(() => {})
-        }
-        return host.readOptions(sessionId)
-      })
-      transport.call.mockImplementation((_target, method) => read(method))
-      const client: RpcClient = {
-        getState: () => 'connected',
-        onStateChange: () => () => {},
-        getReconnectAttempt: () => 0,
-        getLastConnectedAt: () => null,
-        updateTerminalSubscriptionViewport: () => {},
-        notifyForeground: () => {},
-        close: () => {},
-        subscribe: (_method, _params, emit) => subscribe(emit),
-        sendRequest: async (method) => ({ id: 'report-rpc', ok: true, result: await read(method) })
-      }
-      const write = vi.fn()
-      write.mockImplementation(
-        async (_method, _fingerprint, fields: { key: string; value: string }) => {
-          const result = await host.setOption(CALLER, {
-            envelope: envelope('agentSession.setOption', fields),
-            ...fields
-          })
-          if (!result.ok) {
-            throw new Error(`Permission pick refused: ${result.refusal.code}`)
-          }
-          return result.value
-        }
+      const { mount, read, write, subscriptions } = permissionConsumersFor(
+        host,
+        'claude',
+        fence,
+        count
       )
-      const phoneWrite = vi.fn()
-      phoneWrite.mockImplementation(async (...args) => ({
-        status: 'accepted',
-        value: await write(...args),
-        sameFence: true
-      }))
-      const target = { kind: 'local' } as const
-      const common = { agent: 'claude' as const, sessionId, fence }
-      const hooks = [
-        () =>
-          useStructuredAgentSessionOptions({
-            ...common,
-            target,
-            transportEnabled: true,
-            isVisible: true,
-            providerVisible: true,
-            providerStarting: false,
-            turnId: null,
-            unloadedTurnRevisions: undefined,
-            hostOptionStamp: 'model|own',
-            mutate: write
-          }),
-        () =>
-          useMobileStructuredAgentOptions({
-            ...common,
-            client,
-            enabled: true,
-            optionStamp: 'model|own',
-            hostSupport: {
-              permissionModes: true,
-              permissionOwn: true,
-              statusFeed: true,
-              coherentModelCatalog: false
-            },
-            mutate: phoneWrite
-          })
-      ]
-      const mount = () =>
-        hooks.flatMap((useOptions) =>
-          Array.from({ length: count }, () =>
-            renderHook(() => {
-              const { optionSnapshot, setStructuredOption } = useOptions()
-              return { optionSnapshot, setStructuredOption }
-            })
-          )
-        )
       let views = mount()
       const descriptions = () =>
         views.map(
@@ -322,6 +344,99 @@ it.each([1, 10, 100])(
       resetStructuredAgentSessionStatusFeedsForTests()
       resetHostModelCatalogSnapshotsForTests()
       await adapter.closeAll()
+      setLocalRuntimeCapabilitiesForTests(null)
+    }
+  }
+)
+
+it.each(
+  (['omp', 'grok', 'opencode', 'opencode2'] as const).flatMap((agent) =>
+    [false, true].map((fullAccess) => ({ agent, fullAccess }))
+  )
+)(
+  'keeps $agent explicit controls tied to installed fullAccess=$fullAccess, not saved intent',
+  async ({ agent, fullAccess }) => {
+    const spec = acpLaunchSpecFor(agent)
+    if (!spec) {
+      throw new Error('Production ACP spec is required')
+    }
+    expect(spec.permissionModeConfig).toBeUndefined()
+    const resolved = launch(() => false, spec)
+    const { host, store, rig, ready, fence } = await openHostRig({
+      spec,
+      deps: { resolveLaunch: async () => ({ ...(await resolved()), fullAccess }) }
+    })
+    const mode = fullAccess ? 'full-access' : 'ask'
+    const other = fullAccess ? 'ask' : 'full-access'
+    const description = fullAccess ? 'Full access' : 'Ask for approval'
+    try {
+      setLocalRuntimeCapabilitiesForTests([AGENT_SESSION_PERMISSION_OWN_RUNTIME_CAPABILITY])
+      expect(
+        await host.attach(
+          CALLER,
+          attachParams({
+            provider: agent,
+            agent,
+            providerHandle: undefined,
+            accountHome:
+              'accountHomeVariable' in spec.account.pin
+                ? { variable: spec.account.pin.accountHomeVariable, path: '/accounts/acp' }
+                : { kind: 'opencode', locator: { kind: 'unmanaged' } },
+            options: { permissionMode: other }
+          })
+        )
+      ).toMatchObject({ ok: true })
+      await ready()
+      const currentFence = fence()
+      const { mount, write } = permissionConsumersFor(host, agent, currentFence)
+      let views = mount()
+      const rows = () =>
+        views.map((view) =>
+          view.result.current.optionSnapshot.find((row) => row.id === 'permissionMode')
+        )
+      await waitFor(() =>
+        expect(rows().map((row) => row?.description)).toEqual([description, description])
+      )
+      expect(store.getRecord(sessionId)?.permissionMode).toBe(other)
+      expect(host.readStatusSummary(sessionId)?.runtimePermission).toEqual({
+        fence: currentFence,
+        mode
+      })
+      const desktop = views[0],
+        phone = views[1]
+      if (!desktop || !phone) {
+        throw new Error('Both mounted consumers are required')
+      }
+      await act(async () => {
+        expect(await desktop.result.current.setStructuredOption('permissionMode', mode)).toBe(true)
+      })
+      await act(async () => {
+        expect(await phone.result.current.setStructuredOption('permissionMode', other)).toBe(true)
+      })
+      expect(write).toHaveBeenCalledTimes(2)
+      expect(store.getRecord(sessionId)?.permissionMode).toBe(other)
+      rig.child().agent.notify('session/update', {
+        sessionId: 'acp-session-1',
+        update: { sessionUpdate: 'config_option_update', configOptions: GROK_CONFIG_OPTIONS }
+      })
+      await rig.settle()
+      views.forEach((view) => view.unmount())
+      views = mount()
+      await waitFor(() =>
+        expect(rows().map((row) => row?.description)).toEqual([description, description])
+      )
+      expect(rows().every((row) => row?.settable)).toBe(true)
+      expect((await host.readOptions(sessionId)).current).toMatchObject({
+        permissionMode: other,
+        reportedPermissionMode: mode
+      })
+      expect(rig.sent('session/set_config_option')).toHaveLength(0)
+      expect(store.getRecord(sessionId)?.lease.runtimeFence).toBe(currentFence)
+    } finally {
+      cleanup()
+      resetStructuredAgentSessionStatusFeedsForTests()
+      resetHostModelCatalogSnapshotsForTests()
+      await rig.adapter.closeAll()
       setLocalRuntimeCapabilitiesForTests(null)
     }
   }
