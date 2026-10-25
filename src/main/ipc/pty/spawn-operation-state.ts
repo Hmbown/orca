@@ -1,6 +1,6 @@
 import type { PtyRuntimeControllerDeps } from './runtime/controller-deps'
 import type { RuntimePtySpawnState, RuntimePtySpawnArgs } from './runtime/spawn-state'
-import type { PtySpawnTiming } from '../pty-spawn-timing'
+import type { PtySpawnTiming } from './pty-spawn-timing'
 import type { PaneSpawnOperation } from './pane/pane-spawn-operation'
 import type { ReplacedPaneOwner } from './pane/replaced-pane-owner'
 
