@@ -1410,6 +1410,7 @@ export const RPC_PARAMS_BY_METHOD = {
   'terminal.stop': TerminalCloseAll,
   'terminal.stopExact': TerminalStopExact,
   'terminal.subscribe': TerminalSubscribe,
+  'terminal.subscribeClaudeAgentViews': null,
   'terminal.unsubscribe': TerminalUnsubscribe,
   'terminal.updateViewport': TerminalUpdateViewport,
   'terminal.viewClaudeAgent': TerminalViewClaudeAgent,
