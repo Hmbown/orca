@@ -24,10 +24,7 @@ export function hostSettingsApplyChatPermissionModes(settings: unknown): boolean
   )
 }
 
-/**
- * The mode a host predating per-chat modes runs this agent's chats in: Full access when its Agent
- * Permissions carry the bypass flag, else Ask. Null for an agent with no chat modes.
- */
+/** Older hosts use Full access if any startup shell parses a bypass flag, otherwise Ask; null for agents without chat modes. */
 export function legacyHostChatPermissionMode(
   agent: string,
   settings: unknown

@@ -1,4 +1,5 @@
 import { createElement } from 'react'
+import { snapshotEvent } from './use-mobile-structured-agent-session-queued.test-fixture'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { AgentJournalRenderItem } from '../../../src/shared/agent-session-journal-types'
@@ -22,33 +23,9 @@ function snapshot(
   fence: number,
   activity?: AgentSessionTurnActivity
 ): AgentSessionSubscribeEvent {
-  const newest = items.length
-  return {
-    type: 'snapshot',
-    sessionId: 'session-1',
-    fence,
-    ...(activity ? { activity } : {}),
-    page: {
-      sessionId: 'session-1',
-      epoch: 'epoch-1',
-      fence,
-      direction: 'tail',
-      items,
-      removedItemIds: [],
-      submissions: [],
-      window: {
-        oldest: { epoch: 'epoch-1', sequence: 1 },
-        newest: { epoch: 'epoch-1', sequence: newest },
-        nextCursor: { epoch: 'epoch-1', sequence: newest + 1 }
-      },
-      liveCursor: { epoch: 'epoch-1', sequence: newest },
-      hasOlder: false,
-      hasNewer: false
-    }
-  }
+  return { ...snapshotEvent({ items, fence }), ...(activity ? { activity } : {}) }
 }
 
-/** What the one live indicator row reads, resolved off the session journal. */
 describe('useMobileStructuredAgentSession turn indicator', () => {
   let renderer: ReactTestRenderer | null = null
   let hook: ReturnType<typeof useMobileStructuredAgentSession> | null = null
@@ -172,7 +149,6 @@ describe('useMobileStructuredAgentSession turn indicator', () => {
     const passthrough = sendRequest.getMockImplementation()!
     type Reply = Awaited<ReturnType<typeof passthrough>>
     let answer: (value: Reply) => void = () => undefined
-    // The Stop's request stays in flight until the test answers it; every other call is as usual.
     sendRequest.mockImplementation((method: string) =>
       method === 'agentSession.cancel'
         ? new Promise<Reply>((resolve) => (answer = resolve))
@@ -191,7 +167,7 @@ describe('useMobileStructuredAgentSession turn indicator', () => {
     expect(hook?.turnIndicator.stopping).toBe(false)
 
     act(() => hook?.cancel())
-    // This host does not queue sends: a message sent now is held by the host until the stop lands.
+    // Legacy hosts hold a new send until the pending Stop lands.
     expect(hook?.turnIndicator).toMatchObject({
       stopping: true,
       stopRequestInFlight: true,
@@ -236,7 +212,6 @@ describe('useMobileStructuredAgentSession turn indicator', () => {
   })
 })
 
-/** The phone's chat reads the host's "Stopping…" from the status stream the desktop chat reads. */
 describe("useMobileStructuredAgentSession and the host's Stopping", () => {
   type RpcReply = { ok: boolean; result: unknown; _meta: { runtimeId: string } }
   let renderer: ReactTestRenderer | null = null

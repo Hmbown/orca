@@ -20,7 +20,7 @@ import {
   noteStructuredAgentSessionReportedOptions
 } from './structured-agent-session-ran-options'
 import type { StructuredAgentSessionAcquireAborts } from './structured-agent-session-acquire-aborts'
-import { recordAgentSessionProviderHandle } from '../../runtime/agent-session-provider-handle-transition'
+import { recordAgentSessionProviderHandle } from '../../runtime/agent-session/ownership/agent-session-provider-handle-transition'
 import type { AgentSessionRecord } from '../../../shared/agent-session-record'
 import {
   applyStructuredRewindRecovery,

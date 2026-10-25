@@ -10,7 +10,6 @@ import type { PersistedState } from '../../../shared/persisted-state-types'
 import { resolveAgentPermission } from '../../../shared/tui-agent-permission-choice'
 import { resolveTuiAgentLaunchArgs } from '../../../shared/tui-agent-launch-defaults'
 
-// Simulates a profile created before the dedicated Experimental switch was persisted.
 function normalizeLegacyProfile(overrides: Record<string, unknown>): PersistedState['settings'] {
   const defaults = getDefaultPersistedState(homedir())
   const settings: Partial<GlobalSettings> = { ...defaults.settings }

@@ -63,7 +63,7 @@ describe('host form and committed-settings contract', () => {
     render(
       createElement(
         TooltipProvider,
-        {},
+        null,
         createElement(HostAgentLaunchSettings, {
           environmentId: 'ssh-host',
           pairingRevision: 17,

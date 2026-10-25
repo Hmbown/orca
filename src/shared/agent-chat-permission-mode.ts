@@ -26,7 +26,7 @@ export const AGENT_CHAT_PERMISSION_MODES = [
   'full-access'
 ] as const satisfies readonly AgentChatPermissionMode[]
 
-/** The lucide glyph each mode shows; desktop and phone resolve the name in their own icon package. */
+/** Desktop/mobile resolve these lucide names through their own icon packages. */
 export const AGENT_CHAT_PERMISSION_MODE_ICON_NAMES = {
   ask: 'Hand',
   'accept-edits': 'FilePenLine',
@@ -37,7 +37,6 @@ export const AGENT_CHAT_PERMISSION_MODE_ICON_NAMES = {
 export type AgentChatPermissionModeIconName =
   (typeof AGENT_CHAT_PERMISSION_MODE_ICON_NAMES)[AgentChatPermissionMode]
 
-/** The chat option a mode is saved and written under. */
 export const AGENT_CHAT_PERMISSION_MODE_OPTION_ID = 'permissionMode'
 
 export function isAgentChatPermissionMode(value: unknown): value is AgentChatPermissionMode {
@@ -72,8 +71,7 @@ export function savedChatPermissionMode(
   return support.modes.find((mode) => mode === intent) ?? 'ask'
 }
 
-/** The one rule for whether the chat's model runs `auto`: its listed row, or the listed CLI default
- *  when it names none. The host launches with it and the menu offers with it. */
+/** Launch and menu share model auto support: use its listed row, or the listed CLI default when unnamed. */
 export function chatModelSupportsAutoMode(
   models: readonly { id: string; isDefault?: boolean; supportsAutoMode?: boolean }[],
   model: string | null | undefined
@@ -86,7 +84,6 @@ export function chatModelSupportsAutoMode(
   return row?.supportsAutoMode === true
 }
 
-/** Whether the mode a chat runs depends on its model's listed `auto` support. */
 export function chatPermissionModeNeedsModelSupport(
   support: AgentChatPermissionModeSupport,
   intent: unknown
@@ -115,7 +112,6 @@ export function offeredChatPermissionModes(
     : support.modes
 }
 
-/** The host's new-chat default as an agent's chat starts with it; null for an agent with none. */
 export function newChatPermissionMode(
   agent: string,
   setting: unknown
@@ -149,9 +145,7 @@ export function newChatPermissionModeForSettings(
   return newChatPermissionMode(agent, settings?.nativeChatPermissionMode)
 }
 
-/** Whether a chat saved before its agent had modes is filled as Full access: what its agent's own
- *  Arguments ran it with. An agent with no bypass argument never had that choice, so its chats take
- *  the new-chat setting. */
+/** Pre-mode chats inherit argument bypass as Full access; agents without bypass use the new-chat setting. */
 export function preModeChatGetsFullAccess(
   agent: TuiAgent,
   settings: AgentPermissionSettings &
