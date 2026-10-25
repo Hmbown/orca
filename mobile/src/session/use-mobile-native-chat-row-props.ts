@@ -1,5 +1,8 @@
-import { useMemo, useState } from 'react'
-import { createNativeChatRowReuse } from '../../../src/shared/native-chat-row-reuse'
+import { useLayoutEffect, useMemo, useRef } from 'react'
+import {
+  projectMobileNativeChatRows,
+  type MobileNativeChatRowProjection
+} from './mobile-native-chat-row-projection'
 import type {
   NativeChatMessage,
   NativeChatToolCallBlock
@@ -9,8 +12,9 @@ import type { NativeChatResolvedPrompt } from '../../../src/shared/native-chat-r
 import { isActionableStructuredAgentSessionPrompt } from '../../../src/shared/structured-agent-session-live-turn'
 import type { MobileNativeChatTurnRow } from './use-mobile-native-chat-turn-disclosure'
 
-/** Everything a row draws that is particular to it, besides the message itself. */
+/** The message and its derived render inputs share one reuse boundary. */
 export type MobileNativeChatRowProps = MobileNativeChatTurnRow & {
+  message: NativeChatMessage
   rowKey: string
   previousTodoWrite: NativeChatToolCallBlock | undefined
   previousUpdatePlan: NativeChatToolCallBlock | undefined
@@ -33,10 +37,6 @@ export type MobileNativeChatRowLookups = {
   actionablePromptIds: readonly string[] | undefined
 }
 
-// Why: a streamed batch rebuilds the lookups behind these props, and each settled turn's
-// status object with them; reused, `renderItem` and settled rows keep their identity.
-const createRowPropsReuse = () => createNativeChatRowReuse<MobileNativeChatRowProps>(1)
-
 /** One row's props: its turn's, plus what the chat's lookups hold for it. */
 export function resolveMobileNativeChatRowProps(
   index: number,
@@ -45,6 +45,7 @@ export function resolveMobileNativeChatRowProps(
 ): MobileNativeChatRowProps {
   const predecessors = lookups.taskListPredecessors.get(message.id)
   return {
+    message,
     rowKey: lookups.rowKeyOf(message),
     // The calls, not the record: a rebuilt record would defeat the row's memo.
     previousTodoWrite: predecessors?.todowrite,
@@ -57,21 +58,26 @@ export function resolveMobileNativeChatRowProps(
   }
 }
 
-/** Each listed row's props, by list index. `lookups` is memoized: a new object re-resolves every row. */
+// Commit-scoped sharing prevents abandoned renders or another chat from becoming the reuse baseline.
 export function useMobileNativeChatRowProps(
-  listMessages: readonly NativeChatMessage[],
-  lookups: MobileNativeChatRowLookups
-): readonly MobileNativeChatRowProps[] {
-  const [reuseRowProps] = useState(createRowPropsReuse)
-  // Why: the view re-renders on every composer keystroke; only row or lookup changes need this pass.
-  return useMemo(
+  messages: readonly NativeChatMessage[],
+  lookups: MobileNativeChatRowLookups,
+  scope: string
+): MobileNativeChatRowProjection<MobileNativeChatRowProps> {
+  const committed = useRef<{
+    scope: string
+    projection: MobileNativeChatRowProjection<MobileNativeChatRowProps>
+  } | null>(null)
+  const projection = useMemo(
     () =>
-      reuseRowProps(
-        listMessages.map((message, index) =>
-          resolveMobileNativeChatRowProps(index, message, lookups)
-        ),
-        (index) => listMessages[index]!.id
+      projectMobileNativeChatRows(
+        messages.map((message, index) => resolveMobileNativeChatRowProps(index, message, lookups)),
+        committed.current?.scope === scope ? committed.current.projection : undefined
       ),
-    [reuseRowProps, listMessages, lookups]
+    [messages, lookups, scope]
   )
+  useLayoutEffect(() => {
+    committed.current = { scope, projection }
+  }, [projection, scope])
+  return projection
 }

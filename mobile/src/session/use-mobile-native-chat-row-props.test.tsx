@@ -1,44 +1,23 @@
-import { createElement, useMemo } from 'react'
+import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, expect, it } from 'vitest'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
-import type { NativeChatSettledTurns } from '../../../src/shared/native-chat-turn-status'
+import {
+  buildMobileNativeChatTransientData,
+  foldMobileNativeChatMessages
+} from './mobile-native-chat-render-data'
+import { projectMobileNativeChatRows } from './mobile-native-chat-row-projection'
 import {
   useMobileNativeChatRowProps,
-  type MobileNativeChatRowLookups,
-  type MobileNativeChatRowProps
+  type MobileNativeChatRowLookups
 } from './use-mobile-native-chat-row-props'
-import {
-  useMobileNativeChatTurnDisclosure,
-  type MobileNativeChatTurnRow
-} from './use-mobile-native-chat-turn-disclosure'
+import type { MobileNativeChatTurnRow } from './use-mobile-native-chat-turn-disclosure'
 
-const NO_NOTICES: ReadonlyMap<string, string> = new Map()
-const NO_RUN_OWNERS: ReadonlyMap<string, string> = new Map()
-const NO_PREDECESSORS: MobileNativeChatRowLookups['taskListPredecessors'] = new Map()
-const rowKeyOf = (message: NativeChatMessage): string => message.id
-
-function useRowProps(
-  messages: readonly NativeChatMessage[],
-  resolveTurnRow: MobileNativeChatRowLookups['resolveTurnRow'],
-  unsentNotices: ReadonlyMap<string, string>
-): readonly MobileNativeChatRowProps[] {
-  const lookups = useMemo(
-    () => ({
-      resolveTurnRow,
-      rowKeyOf,
-      runOwners: NO_RUN_OWNERS,
-      taskListPredecessors: NO_PREDECESSORS,
-      unsentNotices,
-      receipts: null,
-      actionablePromptIds: undefined
-    }),
-    [resolveTurnRow, unsentNotices]
-  )
-  return useMobileNativeChatRowProps(messages, lookups)
+function message(id: string, text = id): NativeChatMessage {
+  return { id, role: 'user', blocks: [{ type: 'text', text }], timestamp: 1, source: 'transcript' }
 }
 
-const idleTurnRow: MobileNativeChatTurnRow = {
+const turn: MobileNativeChatTurnRow = {
   turnStatus: null,
   turnExpanded: false,
   activeTurnIsWorking: false,
@@ -51,173 +30,147 @@ const idleTurnRow: MobileNativeChatTurnRow = {
   onToggleReasoning: () => {},
   onToggleSubagentGroup: () => {}
 }
-
-function row(id: string, role: NativeChatMessage['role'], text: string): NativeChatMessage {
-  return { id, role, blocks: [{ type: 'text', text }], timestamp: null, source: 'transcript' }
+const lookups: MobileNativeChatRowLookups = {
+  resolveTurnRow: () => turn,
+  rowKeyOf: (row) => row.id,
+  runOwners: new Map(),
+  taskListPredecessors: new Map(),
+  unsentNotices: new Map(),
+  receipts: null,
+  actionablePromptIds: undefined
 }
 
-let rendered: readonly MobileNativeChatRowProps[] = []
+it('reuses rebuilt settled status, work runs, previews and pending echoes together', () => {
+  const source = [
+    message('image'),
+    {
+      ...message('tool'),
+      role: 'assistant' as const,
+      blocks: [{ type: 'tool-call' as const, name: 'Read', input: { path: 'a.ts' } }]
+    }
+  ]
+  const batch = (preview = 'local:photo', pending = 'next', seconds = 4, run = source) => {
+    const data = buildMobileNativeChatTransientData({
+      messages: source,
+      folded: foldMobileNativeChatMessages(source, 'claude'),
+      streaming: null,
+      imagePreviewsByMessageId: { image: [preview] },
+      pending: [{ id: 'pending', text: pending }]
+    }).data
+    return data.map((row) => ({
+      message: row,
+      turnStatus: { workedSeconds: seconds },
+      workRun: [...run]
+    }))
+  }
+  const before = projectMobileNativeChatRows(batch())
+  expect(projectMobileNativeChatRows(batch(), before)).toBe(before)
+  expect(projectMobileNativeChatRows(batch('local:changed'), before).byId.get('image')).not.toBe(
+    before.byId.get('image')
+  )
+  expect(
+    projectMobileNativeChatRows(batch('local:photo', 'edited'), before).byId.get('pending')
+  ).not.toBe(before.byId.get('pending'))
+  expect(
+    projectMobileNativeChatRows(batch('local:photo', 'next', 9), before).rows[0]?.turnStatus
+      .workedSeconds
+  ).toBe(9)
+  const changedRun = [...source, message('new-tool')]
+  expect(
+    projectMobileNativeChatRows(batch('local:photo', 'next', 4, changedRun), before).rows[0]
+      ?.workRun
+  ).toEqual(changedRun)
+  const changedContent = [
+    source[0]!,
+    { ...source[1]!, blocks: [{ type: 'text' as const, text: 'new output' }] }
+  ]
+  expect(
+    projectMobileNativeChatRows(batch('local:photo', 'next', 4, changedContent), before).rows[0]
+      ?.workRun
+  ).toEqual(changedContent)
+})
 
+it('retains order and drops removed ids instead of reviving old rows', () => {
+  const a = { message: message('a') },
+    b = { message: message('b') }
+  const before = projectMobileNativeChatRows([a, b])
+  const reordered = projectMobileNativeChatRows(
+    [{ message: message('b') }, { message: message('a') }],
+    before
+  )
+  expect(reordered.rows).toEqual([b, a])
+  expect(reordered.rows[0]).toBe(b)
+  const removed = projectMobileNativeChatRows([b], reordered)
+  expect(removed.byId.has('a')).toBe(false)
+  expect(projectMobileNativeChatRows([{ message: message('a') }, b], removed).rows[0]).not.toBe(a)
+})
+
+it('does not hide changed disclosure sets, callbacks, nested inputs or message metadata', () => {
+  const row = { message: message('a'), open: new Set<string>(), onToggle: () => {} }
+  const before = projectMobileNativeChatRows([row])
+  for (const changed of [
+    { ...row, open: new Set(['group']) },
+    { ...row, onToggle: () => {} },
+    { ...row, message: { ...row.message, unsent: true as const } },
+    {
+      ...row,
+      message: {
+        ...row.message,
+        blocks: [{ type: 'tool-call' as const, name: 'Read', input: { path: 'changed' } }]
+      }
+    }
+  ]) {
+    expect(projectMobileNativeChatRows([changed], before).rows[0]).toBe(changed)
+  }
+})
+
+let renderer: ReactTestRenderer | null = null
+let projection: ReturnType<typeof useMobileNativeChatRowProps>
 function Harness({
-  messages,
-  workedSeconds = 4,
-  unsentNotices = NO_NOTICES
+  scope,
+  rows,
+  props = lookups
 }: {
-  messages: readonly NativeChatMessage[]
-  workedSeconds?: number
-  unsentNotices?: ReadonlyMap<string, string>
-}): null {
-  // The host rebuilds this map on every batch, equal values or not.
-  const settledTurns: NativeChatSettledTurns = new Map([
-    ['u1', { startedAt: 1_000, workedSeconds }]
-  ])
-  const turns = useMobileNativeChatTurnDisclosure({
-    messages,
-    enabled: true,
-    isWorking: true,
-    settledTurns,
-    scopeKey: 'host\0worktree\0tab-a'
-  })
-  rendered = useRowProps(turns.listMessages, turns.resolveRow, unsentNotices)
+  scope: string
+  rows: NativeChatMessage[]
+  props?: MobileNativeChatRowLookups
+}) {
+  projection = useMobileNativeChatRowProps(rows, props, scope)
   return null
 }
-
-describe('useMobileNativeChatRowProps', () => {
-  let renderer: ReactTestRenderer | null = null
-
-  afterEach(() => {
-    act(() => renderer?.unmount())
-    renderer = null
-  })
-
-  function rows(): readonly MobileNativeChatRowProps[] {
-    return rendered
-  }
-
-  function show(
-    messages: readonly NativeChatMessage[],
-    workedSeconds?: number,
-    unsentNotices?: ReadonlyMap<string, string>
-  ): void {
-    act(() => {
-      const element = createElement(Harness, { messages, workedSeconds, unsentNotices })
-      if (renderer) {
-        renderer.update(element)
-      } else {
-        renderer = create(element)
-      }
-    })
-  }
-
-  const history = [
-    row('u1', 'user', 'go'),
-    row('a1', 'assistant', 'done'),
-    row('u2', 'user', 'next')
-  ]
-
-  it('keeps every row, and the array, while only the live reply grows', () => {
-    show([...history, row('a2', 'assistant', 'Hel')])
-    const before = rows()
-    expect(before[0]?.turnStatus).toMatchObject({ workedSeconds: 4 })
-
-    show([...history, row('a2', 'assistant', 'Hello')])
-
-    expect(rows()).toBe(before)
-  })
-
-  it('keeps unchanged rows when a new row lands, and rebuilds a row whose values change', () => {
-    show([...history, row('a2', 'assistant', 'Hello')])
-    const before = rows()
-
-    show([...history, row('a2', 'assistant', 'Hello'), row('u3', 'user', 'more')])
-    expect(rows()).not.toBe(before)
-    expect(rows()[0]).toBe(before[0])
-
-    show([...history, row('a2', 'assistant', 'Hello'), row('u3', 'user', 'more')], 9)
-    expect(rows()[0]).not.toBe(before[0])
-    expect(rows()[0]?.turnStatus).toMatchObject({ workedSeconds: 9 })
-  })
-
-  it('replaces only the row whose not-sent notice arrives, with turns unchanged', () => {
-    const unsent = { ...row('u3', 'user', 'more'), unsent: true as const }
-    const messages = [...history, unsent]
-    const resolveTurnRow = (): MobileNativeChatTurnRow => idleTurnRow
-    function Notices({ notices }: { notices: ReadonlyMap<string, string> }): null {
-      rendered = useRowProps(messages, resolveTurnRow, notices)
-      return null
+afterEach(() => {
+  act(() => renderer?.unmount())
+  renderer = null
+})
+function show(scope: string, rows: NativeChatMessage[], props = lookups) {
+  act(() => {
+    const element = createElement(Harness, { scope, rows, props })
+    if (renderer) {
+      renderer.update(element)
+    } else {
+      renderer = create(element)
     }
-    act(() => {
-      renderer = create(createElement(Notices, { notices: NO_NOTICES }))
-    })
-    const before = rows()
-    expect(before[3]?.unsentNotice).toBeUndefined()
-
-    act(() =>
-      renderer?.update(
-        createElement(Notices, { notices: new Map([['u3', 'Not sent: the agent stopped']]) })
-      )
-    )
-
-    expect(rows()[3]?.unsentNotice).toBe('Not sent: the agent stopped')
-    expect(rows()[0]).toBe(before[0])
   })
+}
 
-  it('replaces only the row whose run owner or awaiting state changes', () => {
-    const resolveTurnRow = (): MobileNativeChatTurnRow => idleTurnRow
-    function Lookups({
-      runOwners,
-      actionablePromptIds
-    }: Pick<MobileNativeChatRowLookups, 'runOwners' | 'actionablePromptIds'>): null {
-      const lookups = useMemo(
-        () => ({
-          resolveTurnRow,
-          rowKeyOf,
-          runOwners,
-          taskListPredecessors: NO_PREDECESSORS,
-          unsentNotices: NO_NOTICES,
-          receipts: null,
-          actionablePromptIds
-        }),
-        [runOwners, actionablePromptIds]
-      )
-      rendered = useMobileNativeChatRowProps(history, lookups)
-      return null
-    }
-    act(() => {
-      renderer = create(
-        createElement(Lookups, { runOwners: NO_RUN_OWNERS, actionablePromptIds: [] })
-      )
-    })
-    const before = rows()
-
-    act(() =>
-      renderer?.update(
-        createElement(Lookups, {
-          runOwners: new Map([['a1', 'u1']]),
-          actionablePromptIds: ['u2']
-        })
-      )
-    )
-
-    expect(rows()[0]).toBe(before[0])
-    expect(rows()[1]?.runOwner).toBe('u1')
-    expect(before[2]?.awaiting).toBe(false)
-    expect(rows()[2]?.awaiting).toBe(true)
+it('isolates chats with the same ids and applies changed row lookups', () => {
+  const rows = [{ ...message('a'), unsent: true as const }, message('b')]
+  show('chat-a', rows)
+  const before = projection
+  show(
+    'chat-a',
+    rows.map((row) => ({ ...row }))
+  )
+  expect(projection).toBe(before)
+  show('chat-a', rows, {
+    ...lookups,
+    unsentNotices: new Map([['a', 'Not sent']]),
+    runOwners: new Map([['b', 'a']]),
+    actionablePromptIds: ['b']
   })
-
-  it('skips resolving rows on a render that changed neither the rows nor the resolver', () => {
-    const resolveTurnRow = vi.fn((): MobileNativeChatTurnRow => idleTurnRow)
-    // Stands in for the view re-rendering on a composer keystroke.
-    function Static({ composerText }: { composerText: string }): string {
-      rendered = useRowProps(history, resolveTurnRow, NO_NOTICES)
-      return composerText
-    }
-    act(() => {
-      renderer = create(createElement(Static, { composerText: 'h' }))
-    })
-    const calls = resolveTurnRow.mock.calls.length
-    act(() => renderer?.update(createElement(Static, { composerText: 'hi' })))
-
-    expect(resolveTurnRow.mock.calls.length).toBe(calls)
-  })
+  expect(projection.rows[0]?.unsentNotice).toBe('Not sent')
+  expect(projection.rows[1]).toMatchObject({ runOwner: 'a', awaiting: true })
+  show('chat-b', rows)
+  expect(projection.rows[0]).not.toBe(before.rows[0])
+  expect(projection.rows[0]?.unsentNotice).toBeUndefined()
 })

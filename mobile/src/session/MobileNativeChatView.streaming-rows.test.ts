@@ -7,20 +7,15 @@ import type { AgentJournalRenderItem } from '../../../src/shared/agent-session-j
 import { projectStructuredAgentSessionMessages } from '../../../src/shared/structured-agent-session-message-projection'
 import { agentJournalTurnBody } from '../../../src/shared/agent-session-turn-record'
 import { foldMobileNativeChatMessages } from './mobile-native-chat-render-data'
-import { useMobileNativeChatFoldReuse } from './mobile-native-chat-fold-reuse'
 import { useMobileStructuredAgentTurnTiming } from './use-mobile-structured-agent-turn-timing'
 import { MobileNativeChatPageList } from './MobileNativeChatPageList'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import { MobileNativeChatView } from './MobileNativeChatView'
 
 vi.mock('react-native', async () => {
-  const React = await import('react')
   return {
     ActivityIndicator: 'ActivityIndicator',
-    FlatList: React.forwardRef((props, ref) => {
-      React.useImperativeHandle(ref, () => ({ scrollToEnd: vi.fn(), scrollToOffset: vi.fn() }), [])
-      return React.createElement('FlatList', props)
-    }),
+    FlatList: 'FlatList',
     ScrollView: 'ScrollView',
     Platform: { OS: 'web' },
     Pressable: 'Pressable',
@@ -57,14 +52,14 @@ vi.mock('./MobileNativeChatMessage', async () => {
   }
 })
 vi.mock('./MobileNativeChatPromptCard', () => ({ MobileNativeChatPromptCard: 'PromptCard' }))
-vi.mock('./MobileNativeChatAsk', () => ({ MobileNativeChatAsk: 'ChatAsk' }))
-vi.mock('./MobileNativeChatPermission', () => ({ MobileNativeChatPermission: 'ChatPermission' }))
-vi.mock('./MobileNativeChatQuestion', () => ({ MobileNativeChatQuestion: 'ChatQuestion' }))
-vi.mock('../components/ActionSheetModal', () => ({ ActionSheetModal: 'ActionSheetModal' }))
+vi.mock('./MobileNativeChatLiveLine', () => ({ MobileNativeChatLiveLine: 'LiveStatus' }))
 vi.mock('./MobileAgentWorkingIndicator', () => ({
   MobileAgentWorkingIndicator: 'WorkingIndicator'
 }))
-vi.mock('./MobileNativeChatLiveLine', () => ({ MobileNativeChatLiveLine: 'LiveStatus' }))
+vi.mock('../components/ActionSheetModal', () => ({ ActionSheetModal: 'ActionSheetModal' }))
+vi.mock('./MobileNativeChatAsk', () => ({ MobileNativeChatAsk: 'ChatAsk' }))
+vi.mock('./MobileNativeChatPermission', () => ({ MobileNativeChatPermission: 'ChatPermission' }))
+vi.mock('./MobileNativeChatQuestion', () => ({ MobileNativeChatQuestion: 'ChatQuestion' }))
 vi.mock('./MobileNativeChatComposer', () => ({ MobileNativeChatComposer: 'Composer' }))
 
 type ViewProps = Parameters<typeof MobileNativeChatView>[0]
@@ -108,10 +103,7 @@ function Harness({
     () => [...corpus, ...projectStructuredAgentSessionMessages(items, [], [])],
     [items, corpus]
   )
-  const folded = useMobileNativeChatFoldReuse(
-    useMemo(() => foldMobileNativeChatMessages(messages, 'claude'), [messages]),
-    stable.sendSurfaceId
-  )
+  const folded = useMemo(() => foldMobileNativeChatMessages(messages, 'claude'), [messages])
   const timing = useMobileStructuredAgentTurnTiming(
     { items, submissions: [], working: true },
     'live'
@@ -219,8 +211,16 @@ function measure(turns: number, corpus: NativeChatMessage[] = []) {
   })
   expect(renderer!.root.findAllByType(MobileNativeChatPageList)).toHaveLength(1)
   const mounted = renderer!.root.findAll((node) => Object.is(node.type, 'ChatMessage'))
-  expect(mounted.length).toBeGreaterThanOrEqual(turns * 4 + corpus.length)
+  expect(mounted.length).toBe(
+    foldMobileNativeChatMessages(
+      [...corpus, ...projectStructuredAgentSessionMessages(items, [], [])],
+      'claude'
+    ).length + 1
+  )
   expect(mounted.some((node) => node.props.workRun?.length > 1)).toBe(true)
+  expect(
+    mounted.filter((node) => node.props.turnStatus?.workedSeconds === 4).length
+  ).toBeGreaterThanOrEqual(turns)
   const preview = mounted.find((node) => node.props.message.id === 'user-0')!
   expect(preview.props.message.blocks).toContainEqual({ type: 'image-ref', url: 'local:preview' })
   expect(mounted.some((node) => node.props.message.id === 'pending')).toBe(true)
@@ -254,7 +254,7 @@ function measure(turns: number, corpus: NativeChatMessage[] = []) {
     renders: samples.map((sample) => sample.renders),
     meanMs: samples.reduce((sum, sample) => sum + sample.ms, 0) / samples.length
   }
-  console.log('STREAM_PERF', JSON.stringify(result))
+  process.stdout.write(`STREAM_PERF ${JSON.stringify(result)}\n`)
   expect(
     samples.every((sample) => sample.ids.length === 1 && sample.ids[0] === 'live-answer')
   ).toBe(true)
@@ -275,3 +275,50 @@ it.skipIf(!process.env.ORCA_CHAT_PERF_CORPUS)(
     measure(10, corpus)
   }
 )
+
+it('reuses footer rows during a command and returns them to the list afterward', () => {
+  const show = (text: string, holding = true) =>
+    act(() => {
+      const items = journal(0, text).map((item) =>
+        item.body.kind === 'message' && item.body.role === 'user' && holding
+          ? { ...item, body: { ...item.body, command: { name: 'compact' } } }
+          : item
+      )
+      const held: NativeChatMessage = {
+        id: 'held',
+        role: 'user',
+        blocks: [{ type: 'text', text: 'next' }],
+        timestamp: 3,
+        source: 'transcript',
+        queued: true
+      }
+      const folded = [...projectStructuredAgentSessionMessages(items, [], []), held]
+      const element = createElement(MobileNativeChatView, {
+        ...stable,
+        pending: [],
+        messages: folded,
+        folded,
+        status: 'ready',
+        streaming: null,
+        agentWorking: true,
+        structuredActivityUi: true,
+        turnJournal: { items, submissions: [] }
+      })
+      if (renderer) {
+        renderer.update(element)
+      } else {
+        renderer = create(element)
+      }
+    })
+  const listed = (): string[] =>
+    renderer!.root
+      .findByType(MobileNativeChatPageList)
+      .props.rows.map((row: NativeChatMessage) => row.id)
+  show('hello')
+  expect(listed()).not.toContain('held')
+  rendered.clear()
+  show('hello again')
+  expect([...rendered.keys()]).toEqual(['live-answer'])
+  show('done', false)
+  expect(listed()).toContain('held')
+})
