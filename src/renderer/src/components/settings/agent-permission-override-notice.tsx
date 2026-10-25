@@ -62,8 +62,8 @@ export function useAgentPermissionOverrideNotice() {
       }
       return
     }
-    dismiss()
     if (!mounted.current || !after) {
+      dismiss()
       return
     }
     const retained = PERMISSION_CHOICE_AGENTS.filter((agent) => {
@@ -78,6 +78,7 @@ export function useAgentPermissionOverrideNotice() {
       (agent) => before?.overrides[agent] !== undefined && after.overrides[agent] === undefined
     )
     if (!retained.length && !vanished.length) {
+      dismiss()
       return
     }
     active.current = after

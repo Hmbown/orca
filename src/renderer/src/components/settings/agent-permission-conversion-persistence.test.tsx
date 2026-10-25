@@ -583,6 +583,7 @@ it.each([false, true])(
         expect.anything()
       )
     )
+    expect(toast.dismiss).not.toHaveBeenCalled()
     const { options, details, follow } = permissionNotice()
     expect(options?.action).toHaveProperty('label', 'Use Ask for approval')
     expect(within(details).getAllByText(/· Full access/)).toHaveLength(3)
