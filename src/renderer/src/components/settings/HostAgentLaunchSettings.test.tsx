@@ -2,6 +2,7 @@
 import { StrictMode } from 'react'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import userEvent from '@testing-library/user-event'
 import {
   projectAgentLaunchSettings,
   type AgentLaunchSettings
@@ -79,6 +80,8 @@ describe('host launch settings form', () => {
         projectAgentLaunchSettings({ agentPermissionDefault: 'own' })
       )
       render(pane(17))
+      await screen.findByText("Each agent's own settings")
+      await userEvent.setup().click(screen.getByRole('button', { name: 'Permissions' }))
       await screen.findByText(
         supported
           ? 'Terminals and chats follow the agent’s own permission settings.'
