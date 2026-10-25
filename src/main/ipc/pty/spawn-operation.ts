@@ -4,6 +4,7 @@ import { adoptedOutcome, type PtySpawnOutcome } from './spawn-outcome'
 import type { PtySpawnOperationState, PtySpawnExecutionFacts } from './spawn-operation-state'
 import { beginPtySpawn, reportPtyPaneAdoption } from './spawn-begin'
 import { executePtySpawn } from './spawn-execute'
+import { prepareSavedPtyResume } from './spawn-resume'
 import { resolveEarlyPaneKey, resolveEarlyPaneSpawnReservationKey } from './spawn-pane-coordinates'
 import { consumeExitedPaneOperation } from './pane/adopt-stable'
 import { attachOnlyViewOf } from './pane/attach-only-view'
@@ -16,6 +17,14 @@ import { restoreProvisionalPtySize } from './spawn-options-assembly'
 import { spawnWorktreeTarget } from '../../../shared/worktree/host-qualified-identity'
 import { parsePaneKey } from '../../../shared/stable-pane-id'
 import { releaseStoppedPaneBinding } from './pane/pane-owner-replacement'
+import {
+  admitColdRestoreReattach,
+  captureSavedResumeCleanup,
+  forgetRefusedResume,
+  resumeSpawnRefusal,
+  savedResumeRecord,
+  savedResumeResult
+} from './host-env/saved-resume-admission'
 
 type SpawnAdapter<State extends PtySpawnOperationState> = {
   state: State
@@ -23,7 +32,7 @@ type SpawnAdapter<State extends PtySpawnOperationState> = {
   commit: () => Promise<PtySpawnOutcome>
   facts: () => PtySpawnExecutionFacts
   admission?: Promise<void>
-  beforeExecute?: () => void
+  drainsExitedStart?: true
   onCommitted?: () => void
   onOutcome?: (outcome: PtySpawnOutcome) => void
   onError?: (error: unknown) => unknown
@@ -85,6 +94,11 @@ export async function runPtySpawn<State extends PtySpawnOperationState>(
     adapter.onOutcome?.(outcome)
     return outcome
   }
+  const inherit = (adopted: Parameters<typeof adoptedOutcome>[0]) => {
+    const outcome = adoptedOutcome(adopted)
+    Object.assign(outcome.result, ctx.deps.runtime?.getTerminalLaunchResult?.(outcome.result.id))
+    return finish(outcome)
+  }
   const complete = async (operation: PaneSpawnOperation): Promise<PtySpawnOutcome> => {
     ctx.paneSpawnOperation = operation
     ctx.args.paneSpawnOperation = operation
@@ -99,9 +113,57 @@ export async function runPtySpawn<State extends PtySpawnOperationState>(
           }
         })
       : undefined
-    adapter.beforeExecute?.()
-    await executePtySpawn(ctx, adapter.facts())
-    const outcome = finish(await adapter.commit())
+    const facts = adapter.facts()
+    const chooseFresh = await prepareSavedPtyResume(ctx, facts)
+    await executePtySpawn(ctx, facts, chooseFresh)
+    if (!ctx.resumeAdmission) {
+      ctx.resumeAdmission = await admitColdRestoreReattach(
+        runtime,
+        ctx.result,
+        {
+          paneKey: facts.savedResumePaneKey ?? null,
+          saved: savedResumeRecord(ctx.deps.store, facts.savedResumePaneKey ?? null)
+        },
+        ctx.expectedWslDistro
+      )
+      await captureSavedResumeCleanup(
+        runtime,
+        ctx.deps.store,
+        facts.savedResumePaneKey ?? null,
+        ctx.resumeAdmission,
+        args.worktreeId
+      )
+    }
+    if (!ctx.result.isReattach) {
+      Object.assign(ctx.result, savedResumeResult(ctx.resumeAdmission))
+    }
+    const outcome = await adapter.commit()
+    if (
+      outcome.kind === 'committed' ||
+      (outcome.kind === 'registration-exited' && adapter.drainsExitedStart)
+    ) {
+      const refusal = resumeSpawnRefusal(ctx.resumeAdmission)
+      forgetRefusedResume(facts.savedResumePaneKey ?? null, refusal)
+      if (
+        args.worktreeId &&
+        facts.savedResumePaneKey &&
+        refusal &&
+        refusal.verdict !== 'unverifiable'
+      ) {
+        void runtime
+          ?.forgetRefusedSavedResume?.(
+            args.worktreeId,
+            facts.savedResumePaneKey,
+            refusal.refused,
+            refusal.sourceRecord
+          )
+          .catch((error: unknown) => console.warn('[pty] refused resume cleanup failed', error))
+      }
+      if (!ctx.result.isReattach) {
+        runtime?.rememberSavedTerminalLaunchResult?.(outcome.result.id, outcome.result)
+      }
+    }
+    finish(outcome)
     // Runtime hidden P2 follows the awaited prompt-intent wrapper and never an exited result.
     if (outcome.kind !== 'registration-exited') {
       adapter.onCommitted?.()
@@ -140,7 +202,7 @@ export async function runPtySpawn<State extends PtySpawnOperationState>(
     }
     adapter.releaseHiddenMark?.()
     reportPtyPaneAdoption(ctx, adopted)
-    return finish(adoptedOutcome(adopted))
+    return inherit(adopted)
   }
   const fresh = async (operation: PaneSpawnOperation): Promise<PtySpawnOutcome> => {
     if (prepared) {
@@ -167,7 +229,7 @@ export async function runPtySpawn<State extends PtySpawnOperationState>(
             pending.operation
           )
           retirePreparation(adapter, adopted.result.id)
-          return finish(adoptedOutcome(adopted))
+          return inherit(adopted)
         }
       }
       ctx.args = { ...ctx.args, ...parsePaneKey(latePane)! }
@@ -182,7 +244,7 @@ export async function runPtySpawn<State extends PtySpawnOperationState>(
     await adapter.admission
     const early = await beginPtySpawn(ctx, adapter.adoption?.().renderer)
     if (early) {
-      return finish(adoptedOutcome(early))
+      return inherit(early)
     }
     if (adapter.adoption?.().completed?.materialized) {
       return acquire(resolveEarlyPaneKey(args)!, fresh)

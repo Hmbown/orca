@@ -92,7 +92,7 @@ describe('registerPtyHandlers', () => {
     { mode: 'reconnect', rejectProducerRegistration: true },
     { mode: 'claim', rejectProducerRegistration: true }
   ] as const)(
-    'preserves producer publication and registration failure for $mode (reject=$rejectProducerRegistration)',
+    'preserves producer registration without publishing a reconnect as a new launch for $mode (reject=$rejectProducerRegistration)',
     async ({ mode, rejectProducerRegistration }) => {
       const pane = launchRacePane(`producer-${mode}`, '96969696-9696-4696-8696-969696969696')
       const store = Object.assign(createPaneBindingStore(), { getSettings: () => ({}) })
@@ -193,9 +193,12 @@ describe('registerPtyHandlers', () => {
         ptyId: id,
         tabId: expected.tabId,
         paneKey: makePaneKey(expected.tabId, expected.leafId),
-        title: 'Requested title'
+        title: null,
+        isReattach: true
       })
-      expect(created).not.toHaveProperty('isReattach')
+      expect(created.launchConfig).toBeUndefined()
+      expect(created.launchToken).toBeUndefined()
+      expect(created.launchAgent).toBeUndefined()
       expect(producerAssert).toHaveBeenCalledExactlyOnceWith(id, incarnationId)
       expect(releaseFence).not.toHaveBeenCalled()
       expect(register).toHaveBeenCalledTimes(2)
@@ -206,21 +209,12 @@ describe('registerPtyHandlers', () => {
         incarnationId
       })
       expect(runtime.publishedPty(id)).toMatchObject({
-        title: 'Requested title',
-        launchConfig,
-        launchToken: 'producer-launch-token',
-        launchAgent: 'codex'
+        title: null,
+        launchConfig: null,
+        launchToken: null,
+        launchAgent: null
       })
-      expect(runtime.publishedTabs(pane.worktreeId)).toContainEqual(
-        expect.objectContaining({
-          type: 'terminal',
-          ptyId: id,
-          parentTabId: expected.tabId,
-          leafId: expected.leafId,
-          title: 'Requested title',
-          launchAgent: 'codex'
-        })
-      )
+      expect(runtime.publishedTabs(pane.worktreeId)).toBeUndefined()
       clearProviderPtyState(id)
     }
   )

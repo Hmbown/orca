@@ -12,6 +12,16 @@ import {
 } from './pty/pane/spawn-reservation'
 import { makePaneKey } from '../../shared/stable-pane-id'
 
+import { AgentSessionRecordStore } from '../runtime/agent-session-record-store'
+import {
+  agentSessionRecordFixture,
+  agentSessionLeaseFixture
+} from '../../shared/agent-session-record.test-fixture'
+import type { SleepingAgentSessionRecord } from '../../shared/agent-session-resume'
+import { forgetRefusedPaneResumeMock } from './pty-ipc-mock-registry'
+import { agentSessionOwners } from './pty/pane/agent-session-owners'
+import type { TerminalCreateOptions } from '../runtime/runtime-terminal-contracts'
+
 vi.mock('../../shared/layout-owner-switch', () => ({ ORCA_LAYOUT_OWNER_IS_MAIN: true }))
 vi.mock('electron', () => import('./pty-ipc-mock-registry').then((m) => m.electronModuleMock()))
 vi.mock('fs', () => import('./pty-ipc-mock-registry').then((m) => m.fsModuleMock()))
@@ -71,12 +81,30 @@ const PANE: PaneArgs = {
 describe('a window view of a pane main is starting', () => {
   const { handlers, mainWindow } = setupPtyIpcSuite()
 
-  async function viewDuringMainStart(startResult: Record<string, unknown>) {
+  async function viewDuringMainStart(
+    startResult: Record<string, unknown>,
+    resume?: 'fresh' | 'cold'
+  ) {
     let release!: () => void
     const gate = new Promise<void>((done) => {
       release = done
     })
     const providerSpawn = vi.fn(async (opts: { sessionId?: string; attachOnly?: boolean }) => {
+      if (resume) {
+        expect(forgetRefusedPaneResumeMock).not.toHaveBeenCalled()
+        expect(cleanup).not.toHaveBeenCalled()
+        expect(agentSessionOwners.find(claim)).toBeNull()
+        expect(opts).not.toHaveProperty('command')
+        expect(opts).not.toHaveProperty('agentSessionEnsure')
+        expect(opts).not.toHaveProperty('startupCommandDelivery')
+        expect(opts).not.toHaveProperty('startupIngress')
+        expect(opts).not.toHaveProperty('launchAgent')
+        expect(opts).not.toHaveProperty('launchToken')
+        const env = testDouble<{ env?: Record<string, string> }>(opts).env
+        expect(env?.AGENT_ONLY).toBeUndefined()
+        expect(env?.ORCA_AGENT_LAUNCH_TOKEN).toBeUndefined()
+        expect(env?.ORCA_SEQUENCED_STARTUP_COMMAND).toBeUndefined()
+      }
       await gate
       return {
         id: opts.sessionId ?? 'pty-main',
@@ -175,11 +203,82 @@ describe('a window view of a pane main is starting', () => {
       })
       registerPty(...args)
     })
+    const paneKey = makePaneKey(PANE.tabId, PANE.leafId)
+    const providerSession = { key: 'session_id' as const, id: 'provider-session-alpha-1' }
+    const saved: SleepingAgentSessionRecord = {
+      paneKey,
+      worktreeId: PANE.worktreeId,
+      agent: 'claude',
+      providerSession,
+      prompt: '',
+      state: 'working',
+      capturedAt: 20,
+      updatedAt: 21,
+      connectionId: null
+    }
+    const chat = agentSessionRecordFixture(
+      agentSessionLeaseFixture({
+        claimStatus: 'released',
+        ownerProcess: null,
+        reservedSpawnToken: null,
+        deathEvidence: { kind: 'exit-observed', detail: 'closed', observedAt: 1 }
+      })
+    )
+    const records: AgentSessionRecordStore = Object.create(AgentSessionRecordStore.prototype)
+    const list = vi.fn(() => [chat])
+    records.listRecords = list
+    records.getVisibleSessionTabIndex = () => ({ present: true, sessionIds: [chat.sessionId] })
+    const capture = vi.spyOn(runtime, 'readSavedResumeSource').mockResolvedValue(saved)
+    const cleanup = vi.spyOn(runtime, 'forgetRefusedSavedResume').mockResolvedValue()
+    if (resume) {
+      vi.spyOn(runtime, 'openAgentSessionRecordStore').mockResolvedValue(records)
+      vi.spyOn(runtime, 'getAgentProviderSessionRows').mockReturnValue([
+        {
+          paneKey,
+          connectionId: null,
+          agentType: 'claude',
+          state: 'working',
+          prompt: '',
+          receivedAt: 30,
+          stateStartedAt: 31,
+          providerSession
+        }
+      ])
+    }
+    const claim = {
+      agent: 'claude' as const,
+      digestVersion: 1 as const,
+      keyId: 'composition-key',
+      identityDigest: 'composition-C',
+      worktreeScopeDigest: 'composition-wt'
+    }
+    const launch: TerminalCreateOptions =
+      resume === 'fresh'
+        ? {
+            command: 'claude --resume provider-session-alpha-1',
+            launchAgent: 'claude',
+            launchConfig: {
+              agentCommand: 'claude',
+              agentArgs: '',
+              agentEnv: { AGENT_ONLY: 'yes' }
+            },
+            launchToken: 'composition-token',
+            resumeProviderSession: providerSession,
+            resumeOrigin: 'saved',
+            env: {
+              AGENT_ONLY: 'yes',
+              ORCA_AGENT_LAUNCH_TOKEN: 'composition-token',
+              ORCA_SEQUENCED_STARTUP_COMMAND: 'claude --resume provider-session-alpha-1'
+            },
+            agentSessionClaim: claim
+          }
+        : {}
     const started = runtime.createTerminal(`id:${PANE.worktreeId}`, {
       tabId: PANE.tabId,
       leafId: PANE.leafId,
       sessionId: 'pty-main',
-      presentation: 'background'
+      presentation: 'background',
+      ...launch
     })
     await vi.waitFor(() => expect(providerSpawn).toHaveBeenCalledOnce())
     const key = makePaneSpawnReservationKey(
@@ -203,12 +302,55 @@ describe('a window view of a pane main is starting', () => {
     const completed = Promise.all([started, view])
     await vi.waitFor(() => expect(waiting).toHaveBeenCalled())
     release()
-    const [, attached] = await completed
+    const [created, attached] = await completed
     expect(registrations.mock.calls.length).toBeGreaterThanOrEqual(2)
     expect(pending.operation?.acquisition?.reservation.outcome?.kind).toBe('committed')
     expect(pendingRuntimePaneCreatesByOwnerKey.has(key)).toBe(false)
+    if (resume) {
+      const decision = { agent: 'claude', providerSession, verdict: 'chat-home' }
+      expect(created).toMatchObject({
+        ptyId: 'pty-main',
+        agentResumeRefused: 'chat-home',
+        savedResumeDecision: decision
+      })
+      expect(attached).toMatchObject({
+        id: 'pty-main',
+        isReattach: true,
+        agentResumeRefused: 'chat-home',
+        savedResumeDecision: decision
+      })
+      expect(list).toHaveBeenCalledOnce()
+      expect(capture).toHaveBeenCalledOnce()
+      expect(forgetRefusedPaneResumeMock).toHaveBeenCalledOnce()
+      expect(cleanup).toHaveBeenCalledExactlyOnceWith(
+        PANE.worktreeId,
+        paneKey,
+        expect.objectContaining({
+          agent: 'claude',
+          providerSession,
+          expectedStatus: { paneKey, receivedAt: 30, stateStartedAt: 31 },
+          expectedSavedRecord: { paneKey, capturedAt: 20, updatedAt: 21 }
+        }),
+        saved
+      )
+      expect(runtime.getTerminalLaunchResult('pty-main')).toMatchObject({
+        savedResumeDecision: decision
+      })
+      expect(agentSessionOwners.find(claim)).toBeNull()
+    }
     return { view: attached, providerSpawn }
   }
+
+  it.each(['fresh', 'cold'] as const)(
+    'inherits the %s saved refusal through the actual producer and pane join exactly once',
+    async (mode) => {
+      const { providerSpawn } = await viewDuringMainStart(
+        { coldRestore: { scrollback: 'saved output', cwd: '/tmp/view-join' } },
+        mode
+      )
+      expect(providerSpawn).toHaveBeenCalledOnce()
+    }
+  )
 
   it('attaches to the terminal main starts, with one provider request', async () => {
     const coldRestore = { scrollback: 'restored history', cwd: '/tmp/view-join' }

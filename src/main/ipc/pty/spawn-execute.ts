@@ -1,6 +1,5 @@
 import type { PtySpawnResult } from '../../providers/pty-provider-contract'
 import { ptyIncarnationById } from './provider/ownership-state'
-import { tryGetProviderForPty } from './provider/registry'
 import { ensureWslHookRelayForReattach } from '../../agent-hooks/wsl-hook-relay-reattach'
 import { noteWslDistrosRunning } from '../../wsl-background-distro-gate'
 import {
@@ -14,7 +13,14 @@ import {
   excludeAbsentOwnerReplay,
   PaneOwnerContentionError
 } from './pane/pane-spawn-operation'
-import { isProviderAgentSessionOwnerLive } from './provider/liveness'
+import { isRegisteredAgentSessionOwnerLive } from './provider/liveness'
+import type { AgentSessionClaimedSpawnResult } from '../../../shared/agent-session-host-authority'
+import {
+  resumeSpawnRefusal,
+  SavedResumeFreshRefusal,
+  suppressSavedResumeLaunch,
+  type ResumeSpawnRefusal
+} from './host-env/saved-resume-admission'
 import { failPtySpawnExecute } from './spawn-execute-failure'
 import type { PtySpawnOperationState, PtySpawnExecutionFacts } from './spawn-operation-state'
 import { excludeReplacedPaneOwner } from './pane/replaced-pane-owner'
@@ -22,7 +28,8 @@ import { attachViewWithoutOwner } from './pane/attach-only-view'
 
 export async function executePtySpawn(
   ctx: PtySpawnOperationState,
-  facts: PtySpawnExecutionFacts
+  facts: PtySpawnExecutionFacts,
+  chooseFresh: (inherited?: ResumeSpawnRefusal) => Promise<void>
 ): Promise<void> {
   const args = ctx.args
   let awaitingAnotherStart = false
@@ -50,19 +57,7 @@ export async function executePtySpawn(
     if (stablePaneOwnerCandidate) {
       throw new PaneOwnerContentionError()
     }
-    if (ctx.paneSpawnOperation?.mustExist && args.worktreeId && args.tabId && args.leafId) {
-      assertPaneStillExists(
-        ctx.deps.store,
-        args.worktreeId,
-        args.tabId,
-        args.leafId,
-        args.connectionId
-      )
-    }
     const expectedPtyId = ctx.effectiveSessionAppId ?? facts.sessionId
-    if (!stablePaneOwnerCandidate) {
-      facts.beforeProviderSpawn?.()
-    }
     if (expectedPtyId) {
       ctx.pendingRegistrationClaim = ctx.deps.runtime?.beginPtyRegistration?.(expectedPtyId)
       ctx.pendingRegistrationPtyId = expectedPtyId
@@ -78,10 +73,22 @@ export async function executePtySpawn(
       ? (ctx.deps.runtime?.getPtyOutputSequence?.(expectedPtyId) ?? 0)
       : 0
     ctx.spawnTiming?.mark('options')
-    const assertClientStillConnected = (): void => {
+    const validateDispatch = (): void => {
+      facts.validateDispatch?.()
+      if (ctx.paneSpawnOperation?.mustExist && args.worktreeId && args.tabId && args.leafId) {
+        assertPaneStillExists(
+          ctx.deps.store,
+          args.worktreeId,
+          args.tabId,
+          args.leafId,
+          args.connectionId
+        )
+      }
+
       if (args.signal?.aborted) {
         throw new Error('client_disconnected')
       }
+      facts.beforeProviderSpawn?.()
     }
     if (args.agentSessionEnsure && !ctx.preAdoptedStablePane) {
       // Claims can outlive this controller; import authoritative owner listings before deciding absence.
@@ -102,63 +109,93 @@ export async function executePtySpawn(
         ctx.pendingRegistrationPtyId = recoveredOwner.ptyId
       }
       let providerResult: PtySpawnResult | null = null
-      const ensured = await agentSessionOwners.ensure({
-        claim: args.agentSessionEnsure.claim,
-        surface: args.agentSessionEnsure.surface,
-        spawn: async () => {
-          assertClientStillConnected()
-          providerResult = await ctx.provider.spawn(ctx.spawnOptions)
-          ctx.rejectedRegistrationCandidate = providerResult
-          // Lower-owner success proves physical commit even when registration observes an early exit.
-          facts.reportPtySpawnCommitted?.()
-          assertSpawnReplyWasLive(providerResult)
-          ctx.deps.runtime?.assertPtyRegistrationAllowed?.(
-            providerResult.id,
-            providerResult.incarnationId
-          )
-          if (providerResult.incarnationId) {
-            // In-process providers cannot list controller claims; record exact incarnation before ownership promotion.
-            ptyIncarnationById.set(providerResult.id, providerResult.incarnationId)
+      let ensured: AgentSessionClaimedSpawnResult | undefined
+      try {
+        ensured = await agentSessionOwners.ensure({
+          claim: args.agentSessionEnsure.claim,
+          surface: args.agentSessionEnsure.surface,
+          spawn: async () => {
+            await chooseFresh()
+            const refusal = resumeSpawnRefusal(ctx.resumeAdmission)
+            if (refusal) {
+              throw new SavedResumeFreshRefusal(refusal)
+            }
+            validateDispatch()
+            providerResult = await ctx.provider.spawn(ctx.spawnOptions)
+            ctx.rejectedRegistrationCandidate = providerResult
+            // Lower-owner success proves physical commit even when registration observes an early exit.
+            facts.reportPtySpawnCommitted?.()
+            assertSpawnReplyWasLive(providerResult)
+            ctx.deps.runtime?.assertPtyRegistrationAllowed?.(
+              providerResult.id,
+              providerResult.incarnationId
+            )
+            if (providerResult.incarnationId) {
+              // In-process providers cannot list controller claims; record exact incarnation before ownership promotion.
+              ptyIncarnationById.set(providerResult.id, providerResult.incarnationId)
+            }
+            const providerEnsure = providerResult.agentSessionEnsure
+            return {
+              ptyId: providerResult.id,
+              ...(providerEnsure
+                ? {
+                    owner: providerEnsure.owner,
+                    disposition: providerEnsure.disposition
+                  }
+                : {})
+            }
+          },
+          isLive: isRegisteredAgentSessionOwnerLive,
+          onJoin: () => {
+            awaitingAnotherStart = true
           }
-          const providerEnsure = providerResult.agentSessionEnsure
-          return {
-            ptyId: providerResult.id,
-            ...(providerEnsure
-              ? {
-                  owner: providerEnsure.owner,
-                  disposition: providerEnsure.disposition
-                }
-              : {})
-          }
-        },
-        isLive: async (owner) => {
-          const ownerProvider = tryGetProviderForPty(owner.ptyId)
-          if (!ownerProvider) {
-            // Unreachable execution owners remain unknown.
-            throw new Error('execution_owner_unavailable')
-          }
-          return await isProviderAgentSessionOwnerLive(ownerProvider, owner)
-        },
-        onJoin: () => {
-          awaitingAnotherStart = true
+        })
+      } catch (error) {
+        if (!(error instanceof SavedResumeFreshRefusal)) {
+          throw error
         }
-      })
-      awaitingAnotherStart = false
-      ctx.result = providerResult ?? {
-        id: ensured.owner.ptyId,
-        isReattach: true,
-        // Preserve listing-proven incarnation to reject delayed exits from older processes.
-        incarnationId: ptyIncarnationById.get(ensured.owner.ptyId)
+        // The claim has unwound; the refused shell must never become its agent owner.
+        await chooseFresh(error.admission)
+        suppressSavedResumeLaunch(args, ctx.spawnOptions)
+        facts.suppressRefusedLaunch?.()
+        delete args.agentSessionEnsure
+        delete ctx.spawnOptions.agentSessionEnsure
+        validateDispatch()
+        providerResult = await ctx.provider.spawn(ctx.spawnOptions)
+        facts.reportPtySpawnCommitted?.()
+        ctx.stablePaneOwner = null
       }
-      ctx.result.agentSessionEnsure = ensured
+      awaitingAnotherStart = false
+      if (providerResult) {
+        ctx.result = providerResult
+      } else if (ensured) {
+        ctx.result = {
+          id: ensured.owner.ptyId,
+          isReattach: true,
+          incarnationId: ptyIncarnationById.get(ensured.owner.ptyId)
+        }
+      } else {
+        throw new Error('agent_session_owner_missing')
+      }
+      if (ensured) {
+        ctx.result.agentSessionEnsure = ensured
+      }
     } else {
-      assertClientStillConnected()
+      if (!facts.attachOnlyView) {
+        await chooseFresh()
+      }
+      validateDispatch()
       ctx.result = facts.attachOnlyView
         ? await attachViewWithoutOwner(ctx.provider, ctx.spawnOptions)
         : await ctx.provider.spawn(ctx.spawnOptions)
       facts.reportPtySpawnCommitted?.()
       ctx.stablePaneOwner = null
       ctx.rejectedRegistrationCandidate = ctx.result
+    }
+    if (ctx.result.isReattach || ctx.result.agentSessionEnsure?.disposition === 'adopted') {
+      ctx.result.isReattach = true
+      ctx.resumeAdmission = null
+      Object.assign(ctx.result, ctx.deps.runtime?.getTerminalLaunchResult?.(ctx.result.id))
     }
     ctx.rejectedRegistrationCandidate ??= ctx.result
     if (ctx.pendingRegistrationPtyId !== ctx.result.id) {

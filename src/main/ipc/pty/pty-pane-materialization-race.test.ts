@@ -256,7 +256,10 @@ describe('registerPtyHandlers', () => {
     await vi.waitFor(() => expect(providerSpawn).toHaveBeenCalledOnce())
     resolveProviderSpawn({ id: 'pty-runtime-reservation' })
 
-    await expect(runtimeSpawn).resolves.toEqual({ id: 'pty-runtime-reservation' })
+    await expect(runtimeSpawn).resolves.toMatchObject({
+      id: 'pty-runtime-reservation',
+      isReattach: true
+    })
     const windowResult = await rendererSpawn
     expect(windowResult).toMatchObject({ id: 'pty-runtime-reservation' })
     expect(windowResult).not.toHaveProperty('isReattach')
@@ -392,6 +395,12 @@ describe('registerPtyHandlers', () => {
     expect(rendererResult).toEqual({ id: 'pty-renderer' })
     expect(runtimeResult).toEqual({
       id: 'pty-renderer',
+      isReattach: true,
+      launchAgent: undefined,
+      launchToken: undefined,
+      resumeProviderSession: undefined,
+      snapshotKittyKeyboardFlags: undefined,
+      wslDistro: undefined,
       stablePaneOwner: {
         handle: 'term_trusted',
         tabId: 'tab-race',

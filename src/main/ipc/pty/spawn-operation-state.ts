@@ -3,6 +3,7 @@ import type { RuntimePtySpawnState, RuntimePtySpawnArgs } from './runtime/spawn-
 import type { PtySpawnTiming } from './pty-spawn-timing'
 import type { PaneSpawnOperation } from './pane/pane-spawn-operation'
 import type { ReplacedPaneOwner } from './pane/replaced-pane-owner'
+import type { SleepingAgentLaunchConfig } from '../../../shared/agent-session-resume'
 
 export type PtySpawnOperationState = Pick<
   RuntimePtySpawnState,
@@ -31,6 +32,7 @@ export type PtySpawnOperationState = Pick<
   | 'isClaudeLaunch'
   | 'provisionalPtySize'
   | 'ownsNewIncarnation'
+  | 'resumeAdmission'
 > & {
   deps: Pick<
     PtyRuntimeControllerDeps,
@@ -56,6 +58,10 @@ export type PtySpawnExecutionFacts = {
   preAllocatedHandle?: string | null
   replacedPaneOwner?: ReplacedPaneOwner | null
   attachOnlyView?: true
+  savedResumePaneKey?: string | null
+  launchConfig?: SleepingAgentLaunchConfig
+  suppressRefusedLaunch?: () => void
+  validateDispatch?: () => void
   beforeProviderSpawn?: () => void
   reportPtySpawnCommitted?: () => void
 }

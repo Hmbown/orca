@@ -3,6 +3,7 @@ import { createLaunchRaceRuntime } from '../pty-launch-race-test-fixture'
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest'
 import type { AgentPaneLaunchRequest } from '../../../shared/agent-pane-launch-request'
 import { setupPtyIpcSuite } from '../pty-ipc-test-harness'
+import { classifyErrorMock } from '../pty-ipc-mock-registry'
 import { statSyncMock } from '../pty-ipc-mock-registry'
 import { registerPtyHandlers } from './register-handlers'
 import {
@@ -87,6 +88,7 @@ describe('a pane that starts its own agent launch', () => {
     providerSpawn: ReturnType<typeof vi.fn>,
     plan: () => Promise<Record<string, unknown>> = async () => ({ command: 'claude' })
   ) {
+    classifyErrorMock.mockReturnValue({ error_class: 'unknown' })
     installDaemonTestProvider({ spawn: providerSpawn })
     const runtime = {
       ...createLaunchRaceRuntime(),

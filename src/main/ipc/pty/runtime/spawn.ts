@@ -26,12 +26,31 @@ export async function spawnPtyFromRuntimeController(
     },
     facts: () => ({
       sessionId: ctx.sessionId,
+      savedResumePaneKey: ctx.spawnIdentityPaneKey,
+      launchConfig: ctx.args.launchConfig,
+      suppressRefusedLaunch: () => {
+        ctx.launchCommand = undefined
+        ctx.env = ctx.spawnOptions.env
+      },
       paneKey: ctx.spawnIdentityPaneKey,
       preAllocatedHandle: args.preAllocatedHandle,
       beforeProviderSpawn: () => markRuntimeSpawnHiddenBeforeSpawn(ctx),
       reportPtySpawnCommitted: () => ctx.reportPtySpawnCommitted()
     }),
-    commit: () => commitRuntimePtySpawn(ctx),
+    commit: () => {
+      if (!ctx.result.isReattach) {
+        Object.assign(ctx.result, {
+          ...(ctx.agentResumeUnavailable ? { agentResumeUnavailable: true as const } : {}),
+          launchConfig: ctx.args.launchConfig,
+          launchAgent: ctx.args.launchAgent,
+          launchToken: ctx.args.launchToken,
+          resumeProviderSession: ctx.codexResumeArgvDropped
+            ? undefined
+            : ctx.args.resumeProviderSession
+        })
+      }
+      return commitRuntimePtySpawn(ctx)
+    },
     onCommitted: () => commitRuntimeSpawnHiddenDelivery(ctx),
     releaseHiddenMark: () => releaseRuntimeSpawnPreSpawnHiddenMark(ctx),
     adoption: () => ({ completed: args.adoptedStablePane })
@@ -46,10 +65,8 @@ export async function spawnPtyFromRuntimeController(
     stablePaneOwner = { handle, tabId: outcome.owner.tabId, leafId: outcome.owner.leafId }
   }
   return {
-    id: result.id,
-    savedStartupCwd: result.savedStartupCwd,
-    ...(result.incarnationId ? { incarnationId: result.incarnationId } : {}),
-    ...(typeof result.wslDistro === 'string' ? { wslDistro: result.wslDistro } : {}),
+    ...result,
+    wslDistro: result.wslDistro ?? undefined,
     ...(stablePaneOwner ? { stablePaneOwner } : {}),
     ...(result.agentSessionEnsure ? { agentSessionEnsure: result.agentSessionEnsure } : {}),
     ...(result.startupCwdFallback ? { startupCwdFallback: result.startupCwdFallback } : {})

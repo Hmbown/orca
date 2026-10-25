@@ -462,7 +462,7 @@ describe('shared terminal spawn operation/retention scaling contract', () => {
       }
       for (const result of hostResults) {
         expect(result).toMatchObject({ id: expect.stringContaining('scale-pty-') })
-        expect(result).not.toHaveProperty('snapshot')
+        expect(result).toMatchObject({ snapshot, isReattach: true })
       }
     } else if (outcome === 'absent' || outcome === 'successor') {
       for (const result of windowResults) {

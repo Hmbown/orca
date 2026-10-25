@@ -31,6 +31,13 @@ import {
   type LaunchRaceLane
 } from '../pty-launch-race-test-fixture'
 
+import { AgentSessionRecordStore } from '../../runtime/agent-session-record-store'
+import {
+  agentSessionRecordFixture,
+  agentSessionLeaseFixture
+} from '../../../shared/agent-session-record.test-fixture'
+import { forgetRefusedPaneResumeMock } from '../pty-ipc-mock-registry'
+
 vi.mock('electron', () => import('../pty-ipc-mock-registry').then((m) => m.electronModuleMock()))
 vi.mock('fs', () => import('../pty-ipc-mock-registry').then((m) => m.fsModuleMock()))
 vi.mock('node:fs/promises', async (importOriginal) =>
@@ -740,14 +747,48 @@ describe('launch race parity, both spawn lanes', () => {
       async (lane) => {
         const pane = launchRacePane(`race-exited-${lane}`, '83838383-8383-4383-8383-838383838383')
         const ptyId = `pty-exited-${lane}`
+        const paneKey = makePaneKey(pane.tabId, pane.leafId)
+        const providerSession = { key: 'session_id' as const, id: 'provider-session-alpha-1' }
+        const chat = agentSessionRecordFixture(
+          agentSessionLeaseFixture({
+            claimStatus: 'released',
+            ownerProcess: null,
+            reservedSpawnToken: null,
+            deathEvidence: { kind: 'exit-observed', detail: 'closed', observedAt: 1 }
+          })
+        )
+        const records: AgentSessionRecordStore = Object.create(AgentSessionRecordStore.prototype)
+        records.listRecords = () => [chat]
+        records.getVisibleSessionTabIndex = () => ({ present: true, sessionIds: [chat.sessionId] })
+        const forget = vi.fn(async () => {})
+        const remember = vi.fn()
         installDaemonTestProvider({
-          spawn: vi.fn(async () => ({ id: ptyId, incarnationId: 'inc-exited' }))
+          spawn: vi.fn(async () => ({
+            id: ptyId,
+            incarnationId: 'inc-exited',
+            coldRestore: { scrollback: 'final', cwd: '/tmp' }
+          }))
         })
         const runtime = createLaunchRaceRuntime({
           registerPty: vi.fn(() => {
             throw new Error('agent_session_exited_during_start')
           }),
-          getPtyLivenessVerdict: vi.fn(() => ({ status: 'exited' }))
+          getPtyLivenessVerdict: vi.fn(() => ({ status: 'exited' })),
+          openAgentSessionRecordStore: async () => records,
+          getAgentProviderSessionRows: () => [
+            {
+              paneKey,
+              connectionId: null,
+              agentType: 'claude',
+              state: 'working',
+              prompt: '',
+              receivedAt: 1,
+              stateStartedAt: 1,
+              providerSession
+            }
+          ],
+          forgetRefusedSavedResume: forget,
+          rememberSavedTerminalLaunchResult: remember
         })
         const lanes = registerLaunchRaceLanes({ handlers, mainWindow, runtime })
         forgetPtyAfterTest(ptyId)
@@ -755,7 +796,12 @@ describe('launch race parity, both spawn lanes', () => {
         const spawn = lanes.spawn[lane](pane.args)
 
         await (EXITED_DURING_REGISTRATION[lane] === 'resolves'
-          ? expect(spawn).resolves.toMatchObject({ id: ptyId, incarnationId: 'inc-exited' })
+          ? expect(spawn).resolves.toMatchObject({
+              id: ptyId,
+              incarnationId: 'inc-exited',
+              agentResumeRefused: 'chat-home',
+              savedResumeDecision: { agent: 'claude', providerSession, verdict: 'chat-home' }
+            })
           : expect(spawn).rejects.toThrow('agent_session_exited_during_start'))
         expect(runtime.cancelPendingPtyRegistration).toHaveBeenCalledWith(
           ptyId,
@@ -764,6 +810,11 @@ describe('launch race parity, both spawn lanes', () => {
         )
         expect(runtime.noteTerminalSpawnCommit).not.toHaveBeenCalled()
         expect(runtime.reflowHeadlessTerminalToPtyGrid).not.toHaveBeenCalled()
+        expect([
+          forget.mock.calls.length,
+          remember.mock.calls.length,
+          forgetRefusedPaneResumeMock.mock.calls.length
+        ]).toEqual(lane === 'ipc' ? [1, 1, 1] : [0, 0, 0])
       }
     )
 

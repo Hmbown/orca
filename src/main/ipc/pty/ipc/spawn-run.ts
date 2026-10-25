@@ -49,14 +49,21 @@ export async function runPtyIpcSpawn(deps: PtySpawnIpcDeps, request: PtySpawnIpc
       await preparePtyIpcQoderCommand(ctx)
       await buildPtyIpcSpawnOptions(ctx)
     },
-    beforeExecute: () => {
-      ctx.paneAgentLaunch?.refuseIfClosed()
-      if (ORCA_LAYOUT_OWNER_IS_MAIN) {
-        refuseClosedPaneSpawn(deps.store, ctx.args.tabId, ctx.args.leafId)
-      }
-    },
     facts: () => ({
+      validateDispatch: () => {
+        ctx.paneAgentLaunch?.refuseIfClosed()
+        if (ORCA_LAYOUT_OWNER_IS_MAIN) {
+          refuseClosedPaneSpawn(deps.store, ctx.args.tabId, ctx.args.leafId)
+        }
+      },
       sessionId: ctx.effectiveSessionId,
+      savedResumePaneKey: ctx.stablePaneKey,
+      launchConfig: ctx.effectiveLaunchConfig,
+      suppressRefusedLaunch: () => {
+        ctx.launchCommand = undefined
+        ctx.env = ctx.baseEnv = ctx.spawnEnv = ctx.spawnOptions.env
+        ctx.effectiveLaunchConfig = undefined
+      },
       paneKey: ctx.reservationPaneKey,
       preAllocatedHandle: ctx.preAllocatedHandle,
       replacedPaneOwner: ctx.replacedPaneOwner,
@@ -67,6 +74,7 @@ export async function runPtyIpcSpawn(deps: PtySpawnIpcDeps, request: PtySpawnIpc
         }
       }
     }),
+    drainsExitedStart: true,
     commit: () => commitPtyIpcSpawn(ctx),
     onOutcome: (settled) =>
       endPaneAgentLaunch(
