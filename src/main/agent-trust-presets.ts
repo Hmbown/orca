@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs'
-import { join } from 'node:path'
+import { isAbsolute, join } from 'node:path'
 import { writeFileAtomically } from './codex-accounts/fs-utils'
 import { upsertProjectTrustLevel } from './codex/config-toml-trust'
 import { runExclusivelyForCodexTrustConfig } from './codex/codex-trust-config-mutation-queue'
@@ -185,20 +185,24 @@ export function markCodexProjectTrusted(
   return write()
 }
 
-/**
- * Codewhale stores workspace trust in ~/.codewhale/config.toml under the
- * canonical workspace path:
- *   [projects."<realpath>"]
- *   trust_level = "trusted"
- *
- * Same shape as Codex, so the existing TOML upsert handles the write; the file
- * and its `projects` table belong to Codewhale, which creates them on first run.
- */
-export function markCodewhaleProjectTrusted(workspacePath: string, home: string): Promise<void> {
-  const configFile = join(home, '.codewhale', 'config.toml')
+export function markCodewhaleProjectTrusted(
+  workspacePath: string,
+  home: string,
+  env: Record<string, string | undefined> = {}
+): Promise<void> {
+  const expandPath = (value: string) =>
+    value === '~' ? home : /^~[\\/]/.test(value) ? join(home, value.slice(2)) : value
+  const runtimeHome = expandPath(env.CODEWHALE_HOME?.trim() || join(home, '.codewhale'))
+  const configFile = expandPath(
+    env.CODEWHALE_CONFIG_PATH?.trim() || join(runtimeHome, 'config.toml')
+  )
+  if (!isAbsolute(runtimeHome) || !isAbsolute(configFile)) {
+    return Promise.reject(new Error('Codewhale config and home overrides must be absolute'))
+  }
   upsertProjectTrustLevel(configFile, canonicalize(workspacePath), 'trusted')
   return Promise.resolve()
 }
+
 
 function canonicalize(p: string): string {
   // Why: macOS reports `/tmp/x` and `/private/tmp/x` as the same inode, but

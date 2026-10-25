@@ -75,6 +75,7 @@ export async function applyAgentWorkspaceTrust(
           wslDistro: context.wslDistro
         }),
       codexConfigFiles: () => getLocalCodexTrustConfigFiles(agentHome),
+      codewhaleEnv: { ...process.env, ...context.env },
       // Why: Codex queues behind a config lane it shares with Orca's hook installs.
       deadlineMs:
         preset === 'codex' ? AGENT_TRUST_WRITE_DEADLINE_MS : SHORT_AGENT_TRUST_WRITE_DEADLINE_MS

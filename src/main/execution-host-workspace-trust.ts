@@ -30,6 +30,7 @@ export type WorkspaceTrustHost = {
   claudeConfig: () => ClaudeTrustConfigTarget | null
   /** Every config.toml the launched Codex may read, in the hook installer's lock order. */
   codexConfigFiles: () => readonly string[]
+  codewhaleEnv?: Record<string, string | undefined>
   deadlineMs: number
 }
 
@@ -119,7 +120,7 @@ async function writePreset(
     case 'antigravity':
       return markAntigravityWorkspaceTrusted(storedPath, host.agentHome)
     case 'codewhale':
-      return markCodewhaleProjectTrusted(storedPath, host.agentHome)
+      return markCodewhaleProjectTrusted(storedPath, host.agentHome, host.codewhaleEnv)
   }
 }
 
