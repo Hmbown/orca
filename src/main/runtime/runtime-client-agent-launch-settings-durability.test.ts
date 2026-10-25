@@ -484,3 +484,7 @@ describe('durable execution-host launch settings', () => {
     expect(readState().settings.agentDefaultArgs.claude).toBe('--newer-write')
   })
 })
+
+vi.mock('../claude/agent-view-service', () => ({
+  getClaudeAgentViewService: () => ({ reconcile: async () => {} })
+}))

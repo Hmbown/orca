@@ -13452,6 +13452,10 @@
           "manualDeleteWarning": "Only do this if no other machine sharing this home runs Orca for this profile.",
           "close": "Close",
           "reclaimedNotStarted": "The lock was cleared, but Orca’s server did not start."
+        },
+        "claudeSubagentNavigation": {
+          "title": "Claude subagent navigation",
+          "description": "Open Claude subagents from the sidebar. Adds a shortcut to Claude’s keybindings.json and loads an Orca mod in new Orca panes. Requires Claude 2.1.300+ and status hooks. Turning off removes Orca’s shortcut; shortcuts you delete stay deleted."
         }
       },
       "right": {
@@ -18818,7 +18822,8 @@
       },
       "ClaudeAgentViewIndicator": {
         "viewing": "Currently viewing",
-        "viewingChild": "Viewing subagent {{name}}"
+        "viewingChild": "Viewing subagent {{name}}",
+        "returnHint": "Click the parent row to return. Esc stops this subagent. Enter sends your draft to this subagent."
       }
     },
     "i18n": {
