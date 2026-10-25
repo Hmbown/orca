@@ -1,6 +1,7 @@
 import { createElement } from 'react'
 import { act, create, type ReactTestRenderer } from 'react-test-renderer'
 import { afterEach, expect, it } from 'vitest'
+import { stubRpcClient } from '../transport/rpc-client-test-stub'
 import type { NativeChatMessage } from '../../../src/shared/native-chat-types'
 import {
   buildMobileNativeChatTransientData,
@@ -173,4 +174,46 @@ it('isolates chats with the same ids and applies changed row lookups', () => {
   show('chat-b', rows)
   expect(projection.rows[0]).not.toBe(before.rows[0])
   expect(projection.rows[0]?.unsentNotice).toBeUndefined()
+})
+
+it('includes shortened thoughts in the owning work-run recovery context', () => {
+  const head = message('head'),
+    raw = { ...message('thought'), shortened: true as const }
+  const client = stubRpcClient()
+  const props: MobileNativeChatRowLookups = {
+    ...lookups,
+    resolveTurnRow: () => ({ ...turn, workRun: [head, raw] }),
+    itemSource: {
+      client,
+      sessionId: 'session',
+      messageDetail: {
+        raw: (id) => (id === raw.id ? raw : undefined),
+        state: (id) => (id === raw.id ? 'available' : null),
+        load: async () => {}
+      }
+    }
+  }
+  show('chat', [head], props)
+  expect(projection.rows[0]?.itemSource?.details).toContainEqual({
+    id: raw.id,
+    raw,
+    state: 'available'
+  })
+  const before = projection
+  show('chat', [head], {
+    ...props,
+    itemSource: {
+      client,
+      sessionId: 'session',
+      messageDetail: {
+        raw: (id) => (id === raw.id ? raw : undefined),
+        state: () => 'partial',
+        load: async () => {}
+      }
+    }
+  })
+  expect(projection).not.toBe(before)
+  expect(
+    projection.rows[0]?.itemSource?.details.find((detail) => detail.id === raw.id)?.state
+  ).toBe('partial')
 })

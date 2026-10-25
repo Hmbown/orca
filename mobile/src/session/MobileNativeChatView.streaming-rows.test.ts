@@ -44,6 +44,11 @@ vi.mock('lucide-react-native', () => ({
   ChevronsUpDown: 'ChevronsUpDown',
   Square: 'Square'
 }))
+const itemReads = vi.hoisted(() => vi.fn())
+vi.mock('./mobile-native-chat-item-read', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('./mobile-native-chat-item-read')>()),
+  readMobileNativeChatItem: itemReads
+}))
 const rendered = vi.hoisted(() => new Map<string, number>())
 vi.mock('./MobileNativeChatMessage', async () => {
   const React = await import('react')
@@ -249,6 +254,7 @@ afterEach(() => {
   act(() => renderer?.unmount())
   renderer = null
   rendered.clear()
+  itemReads.mockReset()
 })
 
 function measure(turns: number, corpus: NativeChatMessage[] = []) {
@@ -382,4 +388,64 @@ it('reuses footer rows during a command and returns them to the list afterward',
   expect([...rendered.keys()]).toEqual(['live-answer'])
   show('done', false)
   expect(listed()).toContain('held')
+})
+
+it('loads full row text without redrawing other rows and fences a replaced shortened row', async () => {
+  const items = journal(2, 'hello').map((item) =>
+    item.itemId === 'answer-0' ? { ...item, shortened: true as const } : item
+  )
+  const show = (batch: AgentJournalRenderItem[]) =>
+    act(() => {
+      const element = createElement(Harness, { items: batch })
+      if (renderer) {
+        renderer.update(element)
+      } else {
+        renderer = create(element)
+      }
+    })
+  const answer = () =>
+    renderer!.root.find(
+      (node) => Object.is(node.type, 'ChatMessage') && node.props.message.id === 'answer-0'
+    )
+  const complete: AgentJournalRenderItem = {
+    itemId: 'answer-0',
+    sequence: 4,
+    observedAt: 4,
+    revision: 2,
+    body: {
+      kind: 'message',
+      role: 'assistant',
+      blocks: [{ type: 'text', text: 'finished FULL TAIL' }]
+    }
+  }
+  show(items)
+  expect(answer().props.recovery.load).toBe('idle')
+  itemReads.mockResolvedValueOnce(complete)
+  rendered.clear()
+  await act(async () => {
+    answer().props.recovery.onPress()
+  })
+  expect(itemReads).toHaveBeenCalledOnce()
+  expect(answer().props.message.blocks[0].text).toBe('finished FULL TAIL')
+  expect(answer().props.recovery).toBeNull()
+  expect([...rendered.keys()]).toEqual(['answer-0'])
+
+  const replaced = items.map((item) =>
+    item.itemId === 'answer-0' ? { ...item, revision: 3 } : item
+  )
+  show(replaced)
+  const pending = Promise.withResolvers<AgentJournalRenderItem>()
+  itemReads.mockReturnValueOnce(pending.promise)
+  await act(async () => {
+    answer().props.recovery.onPress()
+  })
+  expect(answer().props.recovery.load).toBe('loading')
+  show(replaced.map((item) => (item.itemId === 'answer-0' ? { ...item, revision: 4 } : item)))
+  expect(answer().props.recovery.load).toBe('idle')
+  await act(async () => {
+    pending.resolve(complete)
+    await pending.promise
+  })
+  expect(answer().props.message.blocks[0].text).toBe('finished')
+  expect(answer().props.recovery).not.toBeNull()
 })
