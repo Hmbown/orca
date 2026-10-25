@@ -41,7 +41,7 @@ import type { RuntimeMobileSessionTabsResult } from '../../../shared/runtime-typ
 import { applyWebSessionTabsSnapshot } from './web-session-tabs-sync/snapshot-api'
 import { applyWebSessionTabsStorePatch } from './web-session-tabs-sync/store-patch'
 import { applyLocalStructuredSessionTabSnapshots } from './local-structured-session-tabs-sync/snapshot-apply'
-import { readStructuredAgentLaunchRecord } from '@/lib/structured-agent-session-launch-persistence'
+import { readStructuredAgentLaunchRecord } from '@/lib/agent-session/launch/structured-agent-session-launch-persistence'
 
 const mock = vi.hoisted(() => ({
   rpc: vi.fn(),
@@ -150,6 +150,82 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+it('keeps invisible aliases without retrying them while valid migration and explicit renames still work', async () => {
+  const blank = chat({ executionHostId: 'runtime:paired', customLabel: '\u200B' })
+  const joiners = chat({
+    id: 'joiners-tab',
+    entityId: 'joiners-session',
+    executionHostId: 'runtime:paired',
+    customLabel: '\u200C\u200D'
+  })
+  const valid = chat({
+    id: 'valid-tab',
+    entityId: 'valid-session',
+    executionHostId: 'runtime:paired',
+    customLabel: '  Visible\u200B name  '
+  })
+  seed(blank)
+  useAppStore.setState({
+    unifiedTabsByWorktree: { [workspace.id]: [blank, joiners, valid] },
+    groupsByWorktree: saveWorkspaceLayout(loadChat(blank, 'runtime:paired')).tabGroups ?? {}
+  })
+  let acknowledge = () => {}
+  mock.rpc.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        acknowledge = () => resolve({ applied: true })
+      })
+  )
+  stops.push(installLegacyChatRenameMigration())
+  await waitFor(() => expect(mock.rpc).toHaveBeenCalledTimes(1))
+  expect(mock.rpc).toHaveBeenLastCalledWith(
+    { kind: 'environment', environmentId: 'paired' },
+    'agentSession.rename',
+    { sessionId: valid.entityId, name: 'Visible name', legacyAlias: true }
+  )
+  // Contact retries wait for the valid neighbor's in-flight acknowledgment.
+  mock.contacts.forEach((regained) => regained())
+  await act(async () => acknowledge())
+  const current = (index: number) =>
+    useAppStore.getState().unifiedTabsByWorktree[workspace.id][index]
+  await waitFor(() => expect(current(2).customLabel).toBeNull())
+  expect(mock.rpc).toHaveBeenCalledTimes(1)
+  expect(
+    buildPersistedUnifiedTabSessionData(useAppStore.getState()).unifiedTabs?.[workspace.id]?.map(
+      (tab) => tab.customLabel
+    )
+  ).toEqual(['\u200B', '\u200C\u200D', null])
+
+  useAppStore.getState().setTabCustomTitle(blank.id, 'Visible replacement')
+  await waitFor(() => expect(mock.rpc).toHaveBeenCalledTimes(2))
+  expect(mock.rpc).toHaveBeenLastCalledWith(expect.anything(), 'agentSession.rename', {
+    sessionId: blank.entityId,
+    name: 'Visible replacement'
+  })
+  useAppStore.getState().setTabCustomLabel(blank.id, '\u200D')
+  await act(async () => acknowledge())
+  expect(current(0).customLabel).toBe('\u200D')
+  expect(mock.layout).toHaveBeenCalledTimes(1)
+
+  useAppStore.getState().setTabCustomTitle(blank.id, 'Final visible name')
+  await waitFor(() => expect(mock.rpc).toHaveBeenCalledTimes(3))
+  acknowledge()
+  await waitFor(() => expect(current(0).customLabel).toBeNull())
+  const cleanup = mock.layout.mock.calls[1]
+  expect(cleanup[2](blank.id)).toEqual({
+    type: 'renameTab',
+    tabId: blank.id,
+    kind: 'custom',
+    title: null,
+    expected: {
+      entityId: blank.entityId,
+      executionHostId: 'runtime:paired',
+      customTitle: '\u200D'
+    }
+  })
+  expect(current(1).customLabel).toBe(joiners.customLabel)
+})
+
 it('migrates an inactive restored alias after reconnect and clears both saved copies only after acknowledgment', async () => {
   const alias = 'x'.repeat(5000)
   const tab = chat({
@@ -212,7 +288,9 @@ it('retains a replacement alias when main receives an older session cleanup', as
     answers?.refused?.()
     return true
   })
-  expect(await uploadLegacyStructuredChatRename(useAppStore.getState, tab, 'Legacy')).toBe(false)
+  expect(
+    await uploadLegacyStructuredChatRename(useAppStore.getState, tab, 'Legacy', 'Legacy')
+  ).toBe(false)
   expect(saveWorkspaceLayout(loaded).unifiedTabs?.[workspace.id]?.[0]?.customLabel).toBe('Legacy')
   expect(useAppStore.getState().unifiedTabsByWorktree[workspace.id]?.[0]?.customLabel).toBe(
     'Legacy'
@@ -230,7 +308,9 @@ it('transfers an unstamped alias once its single local owner is known and reload
   mock.snapshot.set(tab.entityId, name(tab, 'History name'))
   mock.rpc.mockResolvedValue({ name: 'History name', applied: false })
   stops.push(installLegacyChatRenameMigration())
-  expect(await uploadLegacyStructuredChatRename(useAppStore.getState, tab, 'Legacy')).toBe(false)
+  expect(
+    await uploadLegacyStructuredChatRename(useAppStore.getState, tab, 'Legacy', 'Legacy')
+  ).toBe(false)
   expect(mock.rpc).not.toHaveBeenCalled()
   const groups = saveWorkspaceLayout(loadChat(tab, 'local')).tabGroups?.[tab.worktreeId] ?? []
   useAppStore.setState({ groupsByWorktree: { [tab.worktreeId]: groups } })
@@ -528,7 +608,12 @@ it('traces legacy runtime storage movement, action routing and switch-away befor
   expect(useAppStore.getState().workspaceSessionReady).toBe(true)
   stops.push(installLegacyChatRenameMigration())
   expect(
-    await uploadLegacyStructuredChatRename(useAppStore.getState, current(), 'Legacy paired')
+    await uploadLegacyStructuredChatRename(
+      useAppStore.getState,
+      current(),
+      'Legacy paired',
+      'Legacy paired'
+    )
   ).toBe(false)
   expect(mock.rpc).not.toHaveBeenCalled()
   expect(current().customLabel).toBe('Legacy paired')
