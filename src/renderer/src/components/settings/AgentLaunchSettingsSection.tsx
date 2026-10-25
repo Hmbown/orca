@@ -83,22 +83,26 @@ function LocalAgentLaunchSettings({
     return write
   }
   const current = () => useAppStore.getState().settings ?? settings
-  const permissions = () => {
-    const latest = current()
+  const permissions = (latest = current()) => {
     return latest.agentPermissionDefault
       ? { default: latest.agentPermissionDefault, overrides: latest.agentPermissionOverrides ?? {} }
       : undefined
   }
   const write = (
     agent: TuiAgent | undefined,
-    compute: (current: GlobalSettings, platform: NodeJS.Platform) => Partial<GlobalSettings>
-  ): Promise<void> => {
+    compute: (current: GlobalSettings, platform: NodeJS.Platform) => Partial<GlobalSettings>,
+    latest = current()
+  ): Promise<GlobalSettings> => {
     return Promise.resolve()
       .then(async () => {
-        const updates = compute(current(), window.api.platform.get().platform)
+        const updates = compute(latest, window.api.platform.get().platform)
+        let acknowledged = latest
         if (Object.keys(updates).length) {
-          await useAppStore.getState().updateSettingsOrThrow(updates)
+          await useAppStore.getState().updateSettingsOrThrow(updates, (settings) => {
+            acknowledged = settings
+          })
         }
+        return acknowledged
       })
       .catch((error: unknown) => {
         toast.error(
@@ -117,17 +121,23 @@ function LocalAgentLaunchSettings({
       })
   }
   const apply = (agent: TuiAgent | undefined, compute: Parameters<typeof write>[1]) =>
-    enqueue(() => write(agent, compute))
+    enqueue(async () => {
+      await write(agent, compute)
+    })
   const follow = (select: SelectPermissionOverrides) =>
     enqueue(async () => {
-      for (const agent of select(permissions())) {
-        if (select(permissions()).includes(agent)) {
-          await write(agent, (latest, platform) =>
-            agentLaunchSettingsMutationUpdates(
-              latest,
-              { type: 'permission', agent, choice: 'default' },
-              platform
-            )
+      let latest = await window.api.settings.get()
+      for (const agent of select(permissions(latest))) {
+        if (select(permissions(latest)).includes(agent)) {
+          latest = await write(
+            agent,
+            (current, platform) =>
+              agentLaunchSettingsMutationUpdates(
+                current,
+                { type: 'permission', agent, choice: 'default' },
+                platform
+              ),
+            latest
           )
         }
       }
@@ -135,11 +145,11 @@ function LocalAgentLaunchSettings({
   const mutate = (mutation: AgentLaunchSettingsMutation): Promise<void> =>
     enqueue(async () => {
       const before = permissions()
-      await write(
+      const after = await write(
         mutation.type !== 'default' && 'agent' in mutation ? mutation.agent : undefined,
         (latest, platform) => agentLaunchSettingsMutationUpdates(latest, mutation, platform)
       )
-      notify(before, permissions(), mutation, follow)
+      notify(before, permissions(after), mutation, follow)
     })
   const saveEnvironment = (agent: TuiAgent, requested: Record<string, string>): Promise<void> =>
     apply(agent, (current, platform) =>

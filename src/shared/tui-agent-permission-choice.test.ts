@@ -177,11 +177,11 @@ it.each([false, true])(
       applyAllAgentsPermission({ agentPermissionDefault: 'auto' }, 'auto').agentPermissionOverrides
     ).toEqual({})
     expect(() =>
-      agentLaunchSettingsMutationUpdates(settings, {
-        type: 'permission',
-        agent: 'gemini',
-        choice: 'ask'
-      })
+      agentLaunchSettingsMutationUpdates(
+        settings,
+        { type: 'permission', agent: 'gemini', choice: 'ask' },
+        'linux'
+      )
     ).toThrow('This agent does not offer that permission')
   }
 )

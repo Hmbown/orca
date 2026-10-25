@@ -630,3 +630,46 @@ it('excludes non-Auto agents and fresh pins, and makes a replaced empty notice c
   expect(useAppStore.getState().settings?.agentPermissionOverrides?.goose).toBe('full-access')
   expect(toast.dismiss).toHaveBeenCalled()
 })
+
+it('carries acknowledged removals when a later ordinary write fences their publication', async () => {
+  useAppStore.setState(({ settings }) => ({
+    settings: settings && {
+      ...settings,
+      agentPermissionOverrides: { claude: 'full-access', codex: 'full-access' }
+    }
+  }))
+  render(<AgentsHarness />)
+  await pickGlobalPermission('Ask for approval')
+  await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1))
+  const initial = useAppStore.getState().settings
+  if (!initial) {
+    throw new Error('Missing settings')
+  }
+  let saved = initial
+  const replies: (() => void)[] = []
+  window.api.settings.get = vi.fn(async () => saved)
+  persist.mockImplementation((updates) => {
+    saved = { ...saved, ...updates }
+    const reply = saved
+    return new Promise((resolve) => replies.push(() => resolve(reply)))
+  })
+  render(<button onClick={noticeAction()}>Follow fenced notice</button>)
+  fireEvent.click(screen.getByRole('button', { name: 'Follow fenced notice' }))
+  await waitFor(() => expect(replies).toHaveLength(1))
+  const unrelated = useAppStore.getState().updateSettings({ pluginSystemEnabled: true })
+  await waitFor(() => expect(replies).toHaveLength(2))
+  await act(async () => replies[0]())
+  await waitFor(() => expect(replies).toHaveLength(3))
+  expect(useAppStore.getState().settings?.agentPermissionOverrides).toEqual(
+    initial.agentPermissionOverrides
+  )
+  const second = persist.mock.calls.at(-1)?.[0].agentPermissionOverrides
+  await act(async () => {
+    replies[2]()
+    replies[1]()
+    await unrelated
+  })
+  expect(second).toEqual({})
+  expect(saved.agentPermissionOverrides).toEqual({})
+  expect(useAppStore.getState().settings?.agentPermissionOverrides).toEqual({})
+})
