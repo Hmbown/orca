@@ -73,7 +73,7 @@ async function subscribePausable(capabilities: Record<string, 1>) {
     harness.registry.cleanupSubscription('terminal-multiplex:conn-desktop-first-paint')
     await harness.dispatchPromise
   }
-  const remoteViewHoldsAuthority = (): boolean => viewSubscribers.hasRemoteReceivingOutput('pty-1')
+  const remoteViewHoldsAuthority = (): boolean => viewSubscribers.hasRemoteAnsweringQueries('pty-1')
   return {
     subscribed: subscribedEvent(),
     setPaused,
