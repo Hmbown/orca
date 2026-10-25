@@ -27,7 +27,6 @@ import {
 } from './native-chat-permission-mode-labels'
 import { runSessionOptionSurfaceCall } from './native-chat-session-option-surface-call'
 
-/** Icon and name; Full access reads in the warning colour wherever it is shown. */
 export function NativeChatPermissionModeName(props: {
   mode: AgentChatPermissionMode
   truncate?: boolean
