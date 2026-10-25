@@ -613,6 +613,7 @@ import {
   TerminalSetViewerColors,
   TerminalSplit,
   TerminalStopExact,
+  TerminalViewClaudeAgent,
   TerminalWait
 } from './terminal-unary-params'
 import { TerminalGetAutoRestoreFitParams } from './terminal-viewport-methods-params'
@@ -1411,6 +1412,7 @@ export const RPC_PARAMS_BY_METHOD = {
   'terminal.subscribe': TerminalSubscribe,
   'terminal.unsubscribe': TerminalUnsubscribe,
   'terminal.updateViewport': TerminalUpdateViewport,
+  'terminal.viewClaudeAgent': TerminalViewClaudeAgent,
   'terminal.wait': TerminalWait,
   'terminalDaemon.restartSevered': TerminalDaemonRestartSeveredParams,
   'terminalDaemon.severedStatus': null,
