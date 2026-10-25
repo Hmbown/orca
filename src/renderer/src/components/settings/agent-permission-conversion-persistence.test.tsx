@@ -8,8 +8,8 @@ import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { useAppStore } from '../../store'
 import { AgentsPane } from './AgentsPane'
-import { persist, runtimeCall } from './settings-persistence-test-fixture'
-import { permissionNotice } from './permission-notice-test-fixture'
+import { persist, runtimeCall } from './__fixtures__/settings-persistence-test-fixture'
+import { permissionNotice } from './__fixtures__/permission-notice-test-fixture'
 import { TooltipProvider } from '../ui/tooltip'
 import {
   measureSettingsWork,

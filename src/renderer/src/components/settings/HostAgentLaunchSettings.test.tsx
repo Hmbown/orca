@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { StrictMode } from 'react'
 import { toast } from 'sonner'
-import { permissionNotice } from './permission-notice-test-fixture'
+import { permissionNotice } from './__fixtures__/permission-notice-test-fixture'
 import userEvent from '@testing-library/user-event'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
