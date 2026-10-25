@@ -20,6 +20,7 @@ import { SettingsHostScopeUnavailableNotice } from './SettingsHostScopePicker'
 import type { SettingsHostScope } from './settings-host-scope'
 import { runtimeTargetEnvironmentId } from '@/runtime/runtime-client-target'
 import { translate } from '@/i18n/i18n'
+import { callRuntimeRpc } from '@/runtime/runtime-rpc-client'
 import {
   useAgentPermissionOverrideNotice,
   type SelectPermissionOverrides
@@ -88,13 +89,28 @@ function LocalAgentLaunchSettings({
       ? { default: latest.agentPermissionDefault, overrides: latest.agentPermissionOverrides ?? {} }
       : undefined
   }
+  const failed = (agent: TuiAgent | undefined) => (error: unknown) => {
+    toast.error(
+      agent
+        ? translate(
+            'settings.agents.localSaveFailedAgent',
+            '{{agent}} settings could not be saved. Try again.',
+            { agent: getAgentLabel(agent) }
+          )
+        : translate(
+            'settings.agents.localSaveFailed',
+            'Agent settings could not be saved. Try again.'
+          )
+    )
+    throw error
+  }
   const write = (
     agent: TuiAgent | undefined,
-    compute: (current: GlobalSettings, platform: NodeJS.Platform) => Partial<GlobalSettings>,
-    latest = current()
+    compute: (current: GlobalSettings, platform: NodeJS.Platform) => Partial<GlobalSettings>
   ): Promise<GlobalSettings> => {
     return Promise.resolve()
       .then(async () => {
+        const latest = current()
         const updates = compute(latest, window.api.platform.get().platform)
         let acknowledged = latest
         if (Object.keys(updates).length) {
@@ -104,21 +120,7 @@ function LocalAgentLaunchSettings({
         }
         return acknowledged
       })
-      .catch((error: unknown) => {
-        toast.error(
-          agent
-            ? translate(
-                'settings.agents.localSaveFailedAgent',
-                '{{agent}} settings could not be saved. Try again.',
-                { agent: getAgentLabel(agent) }
-              )
-            : translate(
-                'settings.agents.localSaveFailed',
-                'Agent settings could not be saved. Try again.'
-              )
-        )
-        throw error
-      })
+      .catch(failed(agent))
   }
   const apply = (agent: TuiAgent | undefined, compute: Parameters<typeof write>[1]) =>
     enqueue(async () => {
@@ -126,19 +128,24 @@ function LocalAgentLaunchSettings({
     })
   const follow = (select: SelectPermissionOverrides) =>
     enqueue(async () => {
-      let latest = await window.api.settings.get()
-      for (const agent of select(permissions(latest))) {
-        if (select(permissions(latest)).includes(agent)) {
-          latest = await write(
-            agent,
-            (current, platform) =>
-              agentLaunchSettingsMutationUpdates(
-                current,
-                { type: 'permission', agent, choice: 'default' },
-                platform
-              ),
-            latest
-          )
+      let agent: TuiAgent | undefined
+      let attempted = false
+      try {
+        for (agent of select(permissions(await window.api.settings.get()))) {
+          if (select(permissions(await window.api.settings.get())).includes(agent)) {
+            attempted = true
+            await callRuntimeRpc(LOCAL_DETECTION_TARGET, 'settings.mutateAgentLaunch', {
+              type: 'permission',
+              agent,
+              choice: 'default'
+            })
+          }
+        }
+      } catch (error) {
+        failed(agent)(error)
+      } finally {
+        if (attempted) {
+          await useAppStore.getState().fetchSettings({ deferOwnerWorktreeVisibilityDefaults: true })
         }
       }
     })

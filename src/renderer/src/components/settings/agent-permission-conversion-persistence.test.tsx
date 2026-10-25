@@ -8,7 +8,8 @@ import userEvent from '@testing-library/user-event'
 import { toast } from 'sonner'
 import { useAppStore } from '../../store'
 import { AgentsPane } from './AgentsPane'
-import { persist } from './settings-persistence-test-fixture'
+import { persist, runtimeCall } from './settings-persistence-test-fixture'
+import { permissionNotice } from './permission-notice-test-fixture'
 import { TooltipProvider } from '../ui/tooltip'
 import {
   measureSettingsWork,
@@ -559,117 +560,115 @@ async function pickGlobalPermission(name: string) {
   await user.click(await screen.findByRole('menuitemradio', { name: new RegExp(name) }))
 }
 
-function noticeAction() {
-  const options = vi.mocked(toast.success).mock.calls.at(-1)?.[1]
-  const action = options?.action
-  if (
-    !action ||
-    typeof action !== 'object' ||
-    !('onClick' in action) ||
-    typeof action.onClick !== 'function'
-  ) {
-    throw new Error('Missing follow action')
-  }
-  return action.onClick
-}
-
-it('keeps differing overrides and clears the full notice set, including overflow, without changing other settings', async () => {
-  useAppStore.setState(({ settings }) => ({
-    settings: settings && {
-      ...settings,
-      agentPermissionOverrides: {
-        claude: 'ask',
-        codex: 'full-access',
-        gemini: 'full-access',
-        grok: 'full-access',
-        goose: 'full-access'
-      },
-      agentDefaultArgs: { codex: '--search' },
-      agentDefaultEnv: { codex: { KEEP: 'yes' } }
+it.each([false, true])(
+  'preserves overflow removals under deferred replies (external update %s)',
+  async (external) => {
+    useAppStore.setState(({ settings }) => ({
+      settings: settings && {
+        ...settings,
+        agentPermissionOverrides: {
+          claude: 'full-access',
+          codex: 'full-access',
+          cursor: 'full-access',
+          grok: 'full-access',
+          goose: 'ask'
+        }
+      }
+    }))
+    render(<AgentsHarness />)
+    await pickGlobalPermission('Ask for approval')
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(
+        '4 agents still use their own setting',
+        expect.anything()
+      )
+    )
+    const { options, details, follow } = permissionNotice()
+    expect(options?.action).toHaveProperty('label', 'Use Ask for approval')
+    expect(within(details).getAllByText(/· Full access/)).toHaveLength(3)
+    expect(details.textContent).toContain('Codex · Full access')
+    expect(details.textContent).toContain('and 1 more')
+    const initial = useAppStore.getState().settings
+    if (!initial) {
+      throw new Error('Missing settings')
     }
-  }))
-  render(<AgentsHarness />)
-  await pickGlobalPermission('Ask for approval')
-  await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1))
-  expect(vi.mocked(toast.success).mock.calls[0]?.[0]).toBe('4 agents still use their own setting')
-  const description = vi.mocked(toast.success).mock.calls[0]?.[1]?.description
-  const details = render(typeof description === 'function' ? description() : description)
-  expect(details.container.textContent).toContain('Codex · Full access')
-  expect(details.container.textContent).toContain('and 1 more')
-  expect(useAppStore.getState().settings?.agentPermissionOverrides?.gemini).toBe('full-access')
-  const before = persist.mock.calls.length
-  render(<button onClick={noticeAction()}>Follow notice</button>)
-  await userEvent.setup().click(screen.getByRole('button', { name: 'Follow notice' }))
-  await waitFor(() => expect(persist).toHaveBeenCalledTimes(before + 4))
-  expect(useAppStore.getState().settings).toMatchObject({
-    agentPermissionDefault: 'ask',
-    agentPermissionOverrides: { claude: 'ask' },
-    agentDefaultArgs: { codex: '--search' },
-    agentDefaultEnv: { codex: { KEEP: 'yes' } }
-  })
-  expect(useAppStore.getState().settings?.agentPermissionOverrides).toEqual({ claude: 'ask' })
-})
-
-it('excludes non-Auto agents and fresh pins, and makes a replaced empty notice callback unusable', async () => {
-  useAppStore.setState(({ settings }) => ({
-    settings: settings && { ...settings, agentPermissionOverrides: { goose: 'full-access' } }
-  }))
-  render(<AgentsHarness />)
-  await pickGlobalPermission('Ask for approval')
-  await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1))
-  const stale = noticeAction()
-  await pickGlobalPermission('Approve for me')
-  await waitFor(() => expect(useAppStore.getState().settings?.agentPermissionDefault).toBe('auto'))
-  expect(toast.success).toHaveBeenCalledTimes(1)
-  const before = persist.mock.calls.length
-  render(<button onClick={stale}>Stale notice</button>)
-  await act(async () => {
-    fireEvent.click(screen.getByRole('button', { name: 'Stale notice' }))
-  })
-  expect(persist).toHaveBeenCalledTimes(before)
-  expect(useAppStore.getState().settings?.agentPermissionOverrides?.goose).toBe('full-access')
-  expect(toast.dismiss).toHaveBeenCalled()
-})
-
-it('carries acknowledged removals when a later ordinary write fences their publication', async () => {
-  useAppStore.setState(({ settings }) => ({
-    settings: settings && {
-      ...settings,
-      agentPermissionOverrides: { claude: 'full-access', codex: 'full-access' }
+    let saved = initial
+    const replies: (() => void)[] = []
+    window.api.settings.get = vi.fn(async () => saved)
+    persist.mockImplementation((updates) => {
+      saved = { ...saved, ...updates }
+      const reply = saved
+      return replies.length < 2
+        ? new Promise((resolve) => replies.push(() => resolve(reply)))
+        : Promise.resolve(reply)
+    })
+    const refresh = vi.spyOn(useAppStore.getState(), 'fetchSettings')
+    await follow()
+    await waitFor(() => expect(replies).toHaveLength(1))
+    const unrelated = useAppStore.getState().updateSettings({ machineName: 'Ordinary edit' })
+    await waitFor(() => expect(replies).toHaveLength(2))
+    try {
+      if (external) {
+        saved = {
+          ...saved,
+          agentPermissionOverrides: {
+            ...saved.agentPermissionOverrides,
+            codex: 'own',
+            gemini: 'full-access'
+          }
+        }
+        useAppStore.setState({ settings: saved })
+      }
+      await act(async () => replies[0]())
+      const expected = external
+        ? { goose: 'ask', codex: 'own', gemini: 'full-access' }
+        : { goose: 'ask' }
+      expect(saved.agentPermissionOverrides).toEqual(expected)
+      await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1))
+      expect(runtimeCall.mock.calls.map(([request]) => request)).toEqual(
+        (external ? ['claude', 'cursor', 'grok'] : ['claude', 'codex', 'cursor', 'grok']).map(
+          (agent) => ({
+            method: 'settings.mutateAgentLaunch',
+            params: { type: 'permission', agent, choice: 'default' }
+          })
+        )
+      )
+      await waitFor(() =>
+        expect(useAppStore.getState().settings?.agentPermissionOverrides).toEqual(expected)
+      )
+    } finally {
+      await act(async () => {
+        replies[1]()
+        await unrelated
+      })
     }
-  }))
-  render(<AgentsHarness />)
-  await pickGlobalPermission('Ask for approval')
-  await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1))
-  const initial = useAppStore.getState().settings
-  if (!initial) {
-    throw new Error('Missing settings')
+    expect(useAppStore.getState().settings?.agentPermissionOverrides).toEqual(
+      saved.agentPermissionOverrides
+    )
+    expect(useAppStore.getState().settings).toMatchObject({
+      machineName: 'Ordinary edit'
+    })
+    if (!external) {
+      await pickGlobalPermission('Full access')
+      await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(2))
+      const stale = permissionNotice()
+      await pickGlobalPermission('Approve for me')
+      await waitFor(() =>
+        expect(useAppStore.getState().settings?.agentPermissionDefault).toBe('auto')
+      )
+      expect(toast.success).toHaveBeenCalledTimes(2)
+      const writes = persist.mock.calls.length
+      const get = vi.spyOn(window.api.settings, 'get')
+      get.mockClear()
+      refresh.mockClear()
+      runtimeCall.mockClear()
+      await stale.follow()
+      expect(persist).toHaveBeenCalledTimes(writes)
+      expect(get).not.toHaveBeenCalled()
+      expect(runtimeCall).not.toHaveBeenCalled()
+      expect(refresh).not.toHaveBeenCalled()
+      expect(useAppStore.getState().settings?.agentPermissionOverrides?.goose).toBe('ask')
+      expect(toast.dismiss).toHaveBeenCalled()
+    }
   }
-  let saved = initial
-  const replies: (() => void)[] = []
-  window.api.settings.get = vi.fn(async () => saved)
-  persist.mockImplementation((updates) => {
-    saved = { ...saved, ...updates }
-    const reply = saved
-    return new Promise((resolve) => replies.push(() => resolve(reply)))
-  })
-  render(<button onClick={noticeAction()}>Follow fenced notice</button>)
-  fireEvent.click(screen.getByRole('button', { name: 'Follow fenced notice' }))
-  await waitFor(() => expect(replies).toHaveLength(1))
-  const unrelated = useAppStore.getState().updateSettings({ pluginSystemEnabled: true })
-  await waitFor(() => expect(replies).toHaveLength(2))
-  await act(async () => replies[0]())
-  await waitFor(() => expect(replies).toHaveLength(3))
-  expect(useAppStore.getState().settings?.agentPermissionOverrides).toEqual(
-    initial.agentPermissionOverrides
-  )
-  const second = persist.mock.calls.at(-1)?.[0].agentPermissionOverrides
-  await act(async () => {
-    replies[2]()
-    replies[1]()
-    await unrelated
-  })
-  expect(second).toEqual({})
-  expect(saved.agentPermissionOverrides).toEqual({})
-  expect(useAppStore.getState().settings?.agentPermissionOverrides).toEqual({})
-})
+)

@@ -138,7 +138,7 @@ export function useAgentPermissionOverrideNotice() {
                   mode
                 }),
                 onClick: () => {
-                  void follow(select)
+                  void Promise.resolve(select(after).length ? follow(select) : undefined)
                     .catch(() => {})
                     .finally(() => {
                       if (active.current === after) {

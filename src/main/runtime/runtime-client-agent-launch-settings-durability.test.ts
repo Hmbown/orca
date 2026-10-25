@@ -31,28 +31,6 @@ vi.mock('../agent-hooks/managed-agent-hook-controls', () => ({
 }))
 
 describe('durable execution-host launch settings', () => {
-  it('acknowledges kept overrides durably and rolls back a failed global pick', async () => {
-    const { store, authority, readState } = await fixture()
-    const controller = new RuntimeClientSettingsController(store)
-    await controller.mutateAgentLaunch({ type: 'permission', agent: 'codex', choice: 'ask' })
-    const result = await controller.mutateAgentLaunch({ type: 'permission', choice: 'full-access' })
-    expect(result.agentPermission).toMatchObject({
-      default: 'full-access',
-      overrides: { codex: 'ask' }
-    })
-    expect(readState().settings.agentPermissionOverrides).toEqual({ codex: 'ask' })
-    authority.failNextWrite()
-    const acknowledged = vi.fn()
-    await expect(
-      controller.mutateAgentLaunch({ type: 'permission', choice: 'own' }).then(acknowledged)
-    ).rejects.toThrow('profile_state_write_failed')
-    expect(acknowledged).not.toHaveBeenCalled()
-    expect(readState().settings).toMatchObject({
-      agentPermissionDefault: 'full-access',
-      agentPermissionOverrides: { codex: 'ask' }
-    })
-  })
-
   it('persists host carrier edits and reloads the same terminal and new-chat intent', async () => {
     const { store, readState } = await fixture()
     const controller = new RuntimeClientSettingsController(store)

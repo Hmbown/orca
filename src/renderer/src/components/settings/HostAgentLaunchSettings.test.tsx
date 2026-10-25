@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { StrictMode } from 'react'
 import { toast } from 'sonner'
+import { permissionNotice } from './permission-notice-test-fixture'
 import userEvent from '@testing-library/user-event'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -519,30 +520,15 @@ it('shows vanished and retained overrides together and only makes the retained a
     )
     .mockResolvedValueOnce(projectAgentLaunchSettings({ agentPermissionDefault: 'ask' }))
   render(pane(17))
-  const user = userEvent.setup()
   await screen.findByRole('button', { name: 'Permissions' })
-  await user.click(screen.getByRole('button', { name: 'Permissions' }))
-  await screen.findByRole('menuitemradio', { name: /Ask for approval/ })
-  await user.click(screen.getByRole('menuitemradio', { name: /Ask for approval/ }))
-  await waitFor(() => expect(transport.mutate).toHaveBeenCalledTimes(1))
+  await userEvent.click(screen.getByRole('button', { name: 'Permissions' }))
+  await userEvent.click(await screen.findByRole('menuitemradio', { name: /Ask for approval/ }))
   await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1))
   expect(vi.mocked(toast.success).mock.calls[0]?.[0]).toBe('1 agent still uses their own setting')
-  const options = vi.mocked(toast.success).mock.calls[0]?.[1]
-  const description = options?.description
-  const details = render(typeof description === 'function' ? description() : description)
-  expect(details.container.textContent).toContain('Claude · Full access')
-  expect(details.container.textContent).toContain('Codex now follows Ask for approval')
-  const action = options?.action
-  if (
-    !action ||
-    typeof action !== 'object' ||
-    !('onClick' in action) ||
-    typeof action.onClick !== 'function'
-  ) {
-    throw new Error('Missing follow action')
-  }
-  render(<button onClick={action.onClick}>Follow host notice</button>)
-  fireEvent.click(screen.getByRole('button', { name: 'Follow host notice' }))
+  const { details, follow } = permissionNotice()
+  expect(details.textContent).toContain('Claude · Full access')
+  expect(details.textContent).toContain('Codex now follows Ask for approval')
+  await follow()
   await waitFor(() => expect(transport.mutate).toHaveBeenCalledTimes(2))
   expect(transport.mutate.mock.calls.map((call) => call[1])).toEqual([
     { type: 'permission', choice: 'ask' },
