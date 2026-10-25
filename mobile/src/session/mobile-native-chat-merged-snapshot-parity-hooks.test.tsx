@@ -1,3 +1,4 @@
+import { MobileNativeChatRowItemSource } from './MobileNativeChatRowItemSource'
 // Compare live merged hooks/list output after every frame with a newly opened chat, including own echoes and host Stopping. Native row rendering, controller input construction and reconnects are outside this proof.
 
 import { createElement, isValidElement, type ReactElement, type ReactNode } from 'react'
@@ -113,6 +114,9 @@ type DrawnRowProps = {
 }
 
 function drawnRow(row: ReactNode): unknown {
+  if (isValidElement<{ children?: ReactNode }>(row) && row.type === MobileNativeChatRowItemSource) {
+    return drawnRow(row.props.children)
+  }
   if (!isValidElement<DrawnRowProps>(row)) {
     return row ?? null
   }

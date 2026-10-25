@@ -160,7 +160,7 @@ describe('MobileNativeChatView', () => {
     const listNode = list()
     const data = listNode.props.data as NativeChatMessage[]
     const index = data.findIndex((row) => row.id === id)
-    return listNode.props.renderItem({ item: data[index], index })
+    return listNode.props.renderItem({ item: data[index], index }).props.children
   }
 
   describe('structured turn status wiring', () => {
