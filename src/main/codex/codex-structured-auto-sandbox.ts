@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { CodexAppServerConnection } from './codex-app-server-connection'
+import type { CodexAppServerConnection } from './app-server/codex-app-server-connection-types'
 import type { CodexSandboxPolicy } from './codex-structured-sandbox-policy'
 
 const configuration = z.object({
