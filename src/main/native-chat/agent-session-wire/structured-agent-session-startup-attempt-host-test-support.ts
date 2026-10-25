@@ -200,7 +200,9 @@ async function heldBehindStart(text: string, interval = 0): Promise<string> {
   const id = await accept(text)
   await eventually(
     async () =>
-      expect((await host.readStatusSummary(SESSION))?.hostExecutionPhase).toBe('starting'),
+      expect((await Promise.resolve(host.readStatusSummary(SESSION)))?.hostExecutionPhase).toBe(
+        'starting'
+      ),
     interval
   )
   return id
